@@ -1,0 +1,68 @@
+name: Guardian Weekly Security Audit
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: guardian-pages
+  cancel-in-progress: true
+
+jobs:
+  fetch-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch open PRs
+        run: python3 scripts/fetch_open_prs.py --repos-file config/repos.json > reports/open-prs.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch CI status
+        run: python3 scripts/fetch_ci_status.py --repos-file config/repos.json > reports/ci-status.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch dependency PRs
+        run: python3 scripts/fetch_renovate_prs.py --repos-file config/repos.json > reports/renovate-prs.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch SonarCloud quality gates
+        run: python3 scripts/fetch_sonar_gates.py --sonar-config config/sonar.json > reports/sonar-gates.json
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Generate HTML dashboard
+        run: |
+          python3 scripts/generate_dashboard.py \
+            --prs reports/open-prs.json \
+            --ci reports/ci-status.json \
+            --renovate reports/renovate-prs.json \
+            --sonar reports/sonar-gates.json \
+            --output docs/index.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

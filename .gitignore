@@ -1,0 +1,14 @@
+reports/*.json
+reports/*.md
+!reports/.gitkeep
+
+# Generated dashboard
+docs/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
