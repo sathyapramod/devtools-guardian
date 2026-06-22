@@ -2,8 +2,8 @@ name: Guardian Daily Check
 
 on:
   schedule:
-    - cron: "0 9 * * *"
-    - cron: "0 15 * * *"
+    - cron: "30 3 * * *"
+    - cron: "30 9 * * *"
   workflow_dispatch:
   push:
     branches: [main, development]
