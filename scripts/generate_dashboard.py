@@ -452,16 +452,77 @@ li { margin-bottom: 0.3rem; font-size: 0.9rem; }
 """
 
 
-def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data):
+def build_correlation_section(correlation_data):
+    if not correlation_data:
+        return ""
+
+    summary = correlation_data.get("summary", {})
+    clusters = correlation_data.get("clusters", [])
+    isolated = correlation_data.get("isolated", [])
+
+    if summary.get("total_failures", 0) == 0:
+        return ""
+
+    content = ""
+
+    if clusters:
+        for i, cluster in enumerate(clusters):
+            ctype = cluster.get("type", "unknown")
+            cls = "error" if ctype == "dependency" else ("warn" if ctype == "temporal" else "neutral")
+            type_label = {"temporal": "Time Cluster", "shared_job": "Shared Job", "dependency": "Dependency Link"}.get(ctype, ctype)
+
+            repos_html = ", ".join(esc(r) for r in cluster.get("repos", []))
+            wf_rows = ""
+            for wf in cluster.get("workflows", [])[:5]:
+                url = wf.get("url", "")
+                link = f'<a href="{esc(url)}" target="_blank">{esc(wf.get("workflow", ""))}</a>' if url else esc(wf.get("workflow", ""))
+                wf_rows += f"<tr><td>{esc(wf.get('repo', ''))}</td><td>{link}</td></tr>"
+
+            dep_html = ""
+            dep_pr = cluster.get("dependency_pr")
+            if dep_pr:
+                dep_url = dep_pr.get("url", "")
+                dep_link = f'<a href="{esc(dep_url)}" target="_blank">#{dep_pr.get("number", "")}</a>' if dep_url else f'#{dep_pr.get("number", "")}'
+                dep_html = f'<p style="margin-top:0.5rem"><strong>Trigger:</strong> {dep_link} — {esc(dep_pr.get("title", "")[:60])}</p>'
+
+            content += f'''<div style="margin-bottom:1rem; padding:0.75rem; border-left:3px solid var(--{cls}); background:var(--{cls}-bg); border-radius:4px;">
+<p><span class="status {cls}">{type_label}</span> <strong>{esc(cluster.get("description", ""))}</strong></p>
+<p style="color:var(--text-muted); font-size:0.85rem;">Likely cause: {esc(cluster.get("likely_cause", "Unknown"))}</p>
+<p style="font-size:0.85rem;">Repos: {repos_html}</p>
+{dep_html}
+<details><summary style="font-size:0.8rem; color:var(--text-muted); cursor:pointer;">Affected workflows</summary>
+<table><thead><tr><th>Repo</th><th>Workflow</th></tr></thead><tbody>{wf_rows}</tbody></table>
+</details>
+</div>'''
+
+    if isolated:
+        rows = ""
+        for f in isolated:
+            url = f.get("url", "")
+            link = f'<a href="{esc(url)}" target="_blank">{esc(f.get("workflow", ""))}</a>' if url else esc(f.get("workflow", ""))
+            jobs = ", ".join(f.get("failing_jobs", [])) or "-"
+            flaky_tag = ' <span class="status warn">flaky</span>' if f.get("is_flaky") else ""
+            rows += f"<tr><td>{esc(f.get('repo', ''))}</td><td>{link}{flaky_tag}</td><td>{esc(jobs)}</td></tr>"
+
+        content += f'''<h3>Isolated Failures ({len(isolated)})</h3>
+<table><thead><tr><th>Repo</th><th>Workflow</th><th>Failing Jobs</th></tr></thead>
+<tbody>{rows}</tbody></table>'''
+
+    total = summary.get("total_failures", 0)
+    return section_html("correlation", "Failure Correlation", total, content)
+
+
+def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data=None):
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     health_cards = build_health_cards(prs_data, ci_data, renovate_data, sonar_data)
     ci_section = build_ci_section(ci_data)
+    correlation_section = build_correlation_section(correlation_data)
     pr_section = build_pr_section(prs_data)
     renovate_section = build_renovate_section(renovate_data)
     sonar_section = build_sonar_section(sonar_data)
 
-    sections = "\n".join(s for s in [ci_section, pr_section, renovate_section, sonar_section] if s)
+    sections = "\n".join(s for s in [ci_section, correlation_section, pr_section, renovate_section, sonar_section] if s)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -493,6 +554,7 @@ def main():
     parser.add_argument("--ci", help="CI status JSON file")
     parser.add_argument("--renovate", help="Renovate/dependency PR JSON file")
     parser.add_argument("--sonar", help="SonarCloud quality gate JSON file")
+    parser.add_argument("--correlation", help="Failure correlation JSON file")
     parser.add_argument("--output", "-o", default="docs/index.html",
                         help="Output HTML file (default: docs/index.html)")
     args = parser.parse_args()
@@ -501,12 +563,13 @@ def main():
     ci_data = load_json_safe(args.ci)
     renovate_data = load_json_safe(args.renovate)
     sonar_data = load_json_safe(args.sonar)
+    correlation_data = load_json_safe(args.correlation)
 
     if not any([prs_data, ci_data, renovate_data, sonar_data]):
         print("ERROR: No data files provided or loadable", file=sys.stderr)
         sys.exit(1)
 
-    html = generate_dashboard(prs_data, ci_data, renovate_data, sonar_data)
+    html = generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data)
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, "w") as f:

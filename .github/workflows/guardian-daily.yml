@@ -53,12 +53,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Correlate CI failures
+        run: python3 scripts/correlate_failures.py --ci reports/ci-status.json --renovate reports/renovate-prs.json -o reports/correlation.json
+
       - name: Generate HTML dashboard
         run: |
           python3 scripts/generate_dashboard.py \
             --prs reports/open-prs.json \
             --ci reports/ci-status.json \
             --renovate reports/renovate-prs.json \
+            --correlation reports/correlation.json \
             --output docs/index.html
 
       - name: Upload Pages artifact

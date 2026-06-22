@@ -1,0 +1,8 @@
+{
+  "name": "devtools-guardian",
+  "description": "Ansible Devtools Guardian — automated pipeline health, PR triage, dependency tracking, SonarCloud quality gates, and CI failure correlation",
+  "author": {
+    "name": "Ansible Devtools",
+    "email": "sds@redhat.com"
+  }
+}

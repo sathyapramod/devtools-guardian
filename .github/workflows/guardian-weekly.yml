@@ -57,6 +57,9 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
+      - name: Correlate CI failures
+        run: python3 scripts/correlate_failures.py --ci reports/ci-status.json --renovate reports/renovate-prs.json -o reports/correlation.json
+
       - name: Generate HTML dashboard
         run: |
           python3 scripts/generate_dashboard.py \
@@ -64,6 +67,7 @@ jobs:
             --ci reports/ci-status.json \
             --renovate reports/renovate-prs.json \
             --sonar reports/sonar-gates.json \
+            --correlation reports/correlation.json \
             --output docs/index.html
 
       - name: Upload Pages artifact
