@@ -18,7 +18,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: guardian-pages
+  group: guardian-daily
   cancel-in-progress: true
 
 jobs:
