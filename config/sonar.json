@@ -15,6 +15,8 @@
     {"key": "ansible_pytest-ansible", "owner": "ansible", "repo": "pytest-ansible"},
     {"key": "ansible_ansible-dev-environment", "owner": "ansible", "repo": "ansible-dev-environment"},
     {"key": "ansible_team-devtools", "owner": "ansible", "repo": "team-devtools"},
-    {"key": "ansible_tox-ansible", "owner": "ansible", "repo": "tox-ansible"}
+    {"key": "ansible_tox-ansible", "owner": "ansible", "repo": "tox-ansible"},
+    {"key": "ansible_mkdocs-ansible", "owner": "ansible", "repo": "mkdocs-ansible"},
+    {"key": "ansible_ansible-backstage-plugins", "owner": "ansible", "repo": "ansible-backstage-plugins"}
   ]
 }
