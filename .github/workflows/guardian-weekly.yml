@@ -5,7 +5,7 @@ on:
     - cron: "30 3 * * 1"
   workflow_dispatch:
   push:
-    branches: [main, development]
+    branches: [main]
     paths:
       - "scripts/**"
       - "config/**"
@@ -29,8 +29,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: development
 
       - name: Set up Python
         uses: actions/setup-python@v5
