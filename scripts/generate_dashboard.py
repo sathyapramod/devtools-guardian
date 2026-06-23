@@ -77,7 +77,7 @@ def section_html(section_id, title, count, content, collapsed=False):
 </details>'''
 
 
-def build_health_cards(prs_data, ci_data, renovate_data, sonar_data):
+def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_data=None):
     cards = []
 
     if ci_data:
@@ -109,6 +109,16 @@ def build_health_cards(prs_data, ci_data, renovate_data, sonar_data):
         cards.append(card_html("Dependencies", status, f"{total} open, {overdue} overdue"))
     else:
         cards.append(card_html("Dependencies", "UNKNOWN", "No data"))
+
+    if codecov_data:
+        agg = codecov_data.get("aggregate", {})
+        avg_cov = agg.get("average_coverage", 0)
+        below_50 = agg.get("repos_below_50", 0)
+        above_80 = agg.get("repos_above_80", 0)
+        status = "OK" if below_50 == 0 else ("WARN" if avg_cov >= 50 else "ERROR")
+        cards.append(card_html("Code Coverage", status, f"{avg_cov}% avg, {above_80} above 80%"))
+    else:
+        cards.append(card_html("Code Coverage", "UNKNOWN", "No data"))
 
     if sonar_data:
         agg = sonar_data.get("aggregate", {})
@@ -403,7 +413,7 @@ h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
 a { color: var(--link); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+.cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem;
         border-left: 4px solid var(--neutral); }
 .card.ok { border-left-color: var(--ok); background: var(--ok-bg); }
@@ -445,11 +455,158 @@ li { margin-bottom: 0.3rem; font-size: 0.9rem; }
 
 @media (max-width: 600px) {
   body { padding: 0.75rem; }
-  .cards { grid-template-columns: 1fr 1fr; }
+  .cards { grid-template-columns: repeat(5, 1fr); gap: 0.5rem; }
   table { font-size: 0.75rem; }
   td, th { padding: 0.35rem; }
 }
 """
+
+
+def build_repo_status_section(ci_data, prs_data, codecov_data):
+    """Build a per-repo status overview grid matching the official DevTools status page.
+
+    Shows CI status, coverage, and open PR count for each repo at a glance.
+    """
+    ci_by_repo = {}
+    if ci_data:
+        for repo in ci_data.get("results", []):
+            slug = f"{repo.get('owner', '?')}/{repo.get('repo', '?')}"
+            ci_by_repo[slug] = repo
+
+    pr_count_by_repo = {}
+    if prs_data:
+        for repo in prs_data.get("results", []):
+            slug = f"{repo.get('owner', '?')}/{repo.get('repo', '?')}"
+            s = repo.get("summary", {})
+            pr_count_by_repo[slug] = s.get("total", 0)
+
+    cov_by_repo = {}
+    if codecov_data:
+        for repo in codecov_data.get("results", []):
+            slug = f"{repo.get('owner', '?')}/{repo.get('repo', '?')}"
+            cov_by_repo[slug] = repo
+
+    all_slugs = sorted(set(list(ci_by_repo.keys()) + list(pr_count_by_repo.keys()) + list(cov_by_repo.keys())))
+
+    if not all_slugs:
+        return ""
+
+    rows = ""
+    for slug in all_slugs:
+        ci_repo = ci_by_repo.get(slug, {})
+        primary = ci_repo.get("primary_ci")
+        ci_s = ci_repo.get("summary", {})
+
+        ci_workflow = ci_repo.get("primary_ci", {}).get("workflow", "") if ci_repo.get("primary_ci") else ""
+        ci_actions_url = f"https://github.com/{slug}/actions/workflows/{ci_workflow}?query=event%3Aschedule" if ci_workflow else f"https://github.com/{slug}/actions"
+
+        if primary:
+            ci_st = primary.get("status", "unknown")
+            ci_cls = "ok" if ci_st == "success" else ("error" if ci_st == "failure" else "neutral")
+            ci_label = primary.get("workflow", "CI")
+            ci_cell = f'<a href="{esc(ci_actions_url)}" target="_blank"><span class="status {ci_cls}">{esc(ci_label)}</span></a>'
+        elif ci_s:
+            failing = ci_s.get("failing", 0)
+            ci_cls = "ok" if failing == 0 else "error"
+            ci_cell = f'<a href="{esc(ci_actions_url)}" target="_blank"><span class="status {ci_cls}">{"Pass" if failing == 0 else "Fail"}</span></a>'
+        else:
+            ci_cell = f'<a href="{esc(ci_actions_url)}" target="_blank"><span class="status neutral">N/A</span></a>'
+
+        cov_repo = cov_by_repo.get(slug, {})
+        coverage = cov_repo.get("coverage")
+        codecov_url = f"https://codecov.io/github/{slug}"
+        if coverage is not None:
+            cov_cls = "ok" if coverage >= 80 else ("warn" if coverage >= 50 else "error")
+            cov_cell = f'<a href="{esc(codecov_url)}" target="_blank"><span class="status {cov_cls}">{coverage}%</span></a>'
+        else:
+            cov_cell = '<span class="status neutral">N/A</span>'
+
+        pr_count = pr_count_by_repo.get(slug, 0)
+        pr_cls = "ok" if pr_count <= 3 else ("warn" if pr_count <= 8 else "error")
+        prs_url = f"https://github.com/{slug}/pulls?q=sort%3Aupdated-desc+is%3Apr+is%3Aopen+-is%3Adraft"
+        pr_cell = f'<a href="{esc(prs_url)}" target="_blank"><span class="status {pr_cls}">{pr_count} PRs</span></a>'
+
+        owner_repo = slug.split("/", 1)
+        repo_name = owner_repo[1] if len(owner_repo) > 1 else slug
+        repo_url = f"https://github.com/{slug}"
+        rows += (
+            f'<tr>'
+            f'<td><a href="{esc(repo_url)}" target="_blank">{esc(repo_name)}</a></td>'
+            f'<td>{ci_cell}</td>'
+            f'<td>{cov_cell}</td>'
+            f'<td>{pr_cell}</td>'
+            f'</tr>'
+        )
+
+    content = f'''<table>
+<thead><tr><th>Repository</th><th>CI Status</th><th>Coverage</th><th>Open PRs</th></tr></thead>
+<tbody>{rows}</tbody>
+</table>'''
+
+    return section_html("repo-status", "Repository Status", len(all_slugs), content)
+
+
+def build_codecov_section(codecov_data):
+    """Build the Code Coverage section from Codecov data."""
+    if not codecov_data:
+        return ""
+
+    results = codecov_data.get("results", [])
+    if not results:
+        return ""
+
+    results_sorted = sorted(results, key=lambda r: r.get("coverage") or 0)
+
+    rows = ""
+    for repo in results_sorted:
+        slug = f"{repo.get('owner', '?')}/{repo.get('repo', '?')}"
+
+        codecov_url = f"https://codecov.io/github/{slug}"
+        repo_url = f"https://github.com/{slug}"
+
+        if repo.get("error"):
+            rows += f'<tr class="error"><td><a href="{esc(repo_url)}" target="_blank">{esc(slug)}</a></td><td colspan="4">Error fetching data</td></tr>'
+            continue
+
+        coverage = repo.get("coverage")
+        if coverage is not None:
+            cov_cls = "ok" if coverage >= 80 else ("warn" if coverage >= 50 else "error")
+            coverage_str = f'<a href="{esc(codecov_url)}" target="_blank"><span class="status {cov_cls}">{coverage}%</span></a>'
+        else:
+            coverage_str = '<span class="status neutral">N/A</span>'
+
+        lines = repo.get("lines", 0)
+        hits = repo.get("hits", 0)
+        misses = repo.get("misses", 0)
+
+        rows += (
+            f'<tr>'
+            f'<td><a href="{esc(repo_url)}" target="_blank">{esc(slug)}</a></td>'
+            f'<td>{coverage_str}</td>'
+            f'<td>{lines:,}</td>'
+            f'<td>{hits:,}</td>'
+            f'<td>{misses:,}</td>'
+            f'</tr>'
+        )
+
+    content = f'''<table>
+<thead><tr><th>Repository</th><th>Coverage</th><th>Lines</th><th>Hits</th><th>Misses</th></tr></thead>
+<tbody>{rows}</tbody>
+</table>'''
+
+    agg = codecov_data.get("aggregate", {})
+    below_50 = agg.get("repos_below_50", 0)
+    if below_50 > 0:
+        low_cov = [r for r in results if not r.get("error") and r.get("coverage") is not None and r["coverage"] < 50]
+        if low_cov:
+            details = "".join(
+                f"<li><strong>{esc(r.get('owner', '?'))}/{esc(r.get('repo', '?'))}</strong> — {r['coverage']}%</li>"
+                for r in low_cov
+            )
+            content = f"<h3>Low Coverage ({below_50} repos below 50%)</h3><ul>{details}</ul>" + content
+
+    total = codecov_data.get("total_repos", len(results))
+    return section_html("codecov", "Code Coverage (Codecov)", total, content, collapsed=True)
 
 
 def build_correlation_section(correlation_data):
@@ -512,17 +669,19 @@ def build_correlation_section(correlation_data):
     return section_html("correlation", "Failure Correlation", total, content)
 
 
-def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data=None):
+def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data=None, codecov_data=None):
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-    health_cards = build_health_cards(prs_data, ci_data, renovate_data, sonar_data)
+    health_cards = build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_data)
+    repo_status_section = build_repo_status_section(ci_data, prs_data, codecov_data)
     ci_section = build_ci_section(ci_data)
     correlation_section = build_correlation_section(correlation_data)
     pr_section = build_pr_section(prs_data)
+    codecov_section = build_codecov_section(codecov_data)
     renovate_section = build_renovate_section(renovate_data)
     sonar_section = build_sonar_section(sonar_data)
 
-    sections = "\n".join(s for s in [ci_section, correlation_section, pr_section, renovate_section, sonar_section] if s)
+    sections = "\n".join(s for s in [repo_status_section, ci_section, correlation_section, pr_section, codecov_section, renovate_section, sonar_section] if s)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -554,6 +713,7 @@ def main():
     parser.add_argument("--ci", help="CI status JSON file")
     parser.add_argument("--renovate", help="Renovate/dependency PR JSON file")
     parser.add_argument("--sonar", help="SonarCloud quality gate JSON file")
+    parser.add_argument("--codecov", help="Codecov coverage JSON file")
     parser.add_argument("--correlation", help="Failure correlation JSON file")
     parser.add_argument("--output", "-o", default="docs/index.html",
                         help="Output HTML file (default: docs/index.html)")
@@ -563,13 +723,14 @@ def main():
     ci_data = load_json_safe(args.ci)
     renovate_data = load_json_safe(args.renovate)
     sonar_data = load_json_safe(args.sonar)
+    codecov_data = load_json_safe(args.codecov)
     correlation_data = load_json_safe(args.correlation)
 
-    if not any([prs_data, ci_data, renovate_data, sonar_data]):
+    if not any([prs_data, ci_data, renovate_data, sonar_data, codecov_data]):
         print("ERROR: No data files provided or loadable", file=sys.stderr)
         sys.exit(1)
 
-    html = generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data)
+    html = generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data, codecov_data)
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, "w") as f:

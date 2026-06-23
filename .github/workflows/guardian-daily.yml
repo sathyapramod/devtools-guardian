@@ -51,6 +51,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Fetch Codecov coverage
+        run: python3 scripts/fetch_codecov.py --codecov-config config/codecov.json > reports/codecov.json
+
       - name: Correlate CI failures
         run: python3 scripts/correlate_failures.py --ci reports/ci-status.json --renovate reports/renovate-prs.json -o reports/correlation.json
 
@@ -60,6 +63,7 @@ jobs:
             --prs reports/open-prs.json \
             --ci reports/ci-status.json \
             --renovate reports/renovate-prs.json \
+            --codecov reports/codecov.json \
             --correlation reports/correlation.json \
             --output docs/index.html
 
