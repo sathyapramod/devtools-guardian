@@ -40,7 +40,14 @@ python3 scripts/fetch_ci_status.py --repos-file config/repos.json
 
 # Custom time range
 python3 scripts/fetch_ci_status.py --repos-file config/repos.json --days 7
+
+# Scheduled runs only (matches official DevTools status page)
+python3 scripts/fetch_ci_status.py --repos-file config/repos.json --event schedule
 ```
+
+**Primary CI tracking:** Each repo's main CI workflow (configured via
+`ci_workflow` in repos.json) is tracked separately using `event=schedule`,
+matching the official Ansible DevTools status page badges.
 
 **Flaky detection:** A workflow is flagged as flaky if its last 5 runs
 alternate between success and failure 2+ times.
@@ -77,6 +84,23 @@ SONAR_TOKEN=xxx python3 scripts/fetch_sonar_gates.py --sonar-config config/sonar
 duplicated_lines_density, security_hotspots, ncloc, reliability_rating,
 security_rating, sqale_rating.
 
+## fetch_codecov.py
+
+```bash
+# All repos from codecov config
+python3 scripts/fetch_codecov.py --codecov-config config/codecov.json
+
+# All repos from repos.json
+python3 scripts/fetch_codecov.py --repos-file config/repos.json
+
+# Single repo
+python3 scripts/fetch_codecov.py ansible ansible-lint
+```
+
+**Metrics fetched:** coverage percentage, lines, hits, misses, branches,
+language, and active status per repo. Aggregates include average/min/max
+coverage, repos above 80%, and repos below 50%.
+
 ## correlate_failures.py
 
 ```bash
@@ -102,11 +126,12 @@ python3 scripts/correlate_failures.py --ci reports/ci-status.json -o reports/cor
 python3 scripts/generate_report.py prs reports/open-prs.json
 python3 scripts/generate_report.py ci reports/ci-status.json
 python3 scripts/generate_report.py renovate reports/renovate-prs.json
+python3 scripts/generate_report.py codecov reports/codecov.json
 python3 scripts/generate_report.py sonar reports/sonar-gates.json
 
 # Consolidated reports
-python3 scripts/generate_report.py guardian --prs FILE --ci FILE --renovate FILE --sonar FILE
-python3 scripts/generate_report.py handoff --prs FILE --ci FILE --renovate FILE --sonar FILE
+python3 scripts/generate_report.py guardian --prs FILE --ci FILE --renovate FILE --codecov FILE --sonar FILE
+python3 scripts/generate_report.py handoff --prs FILE --ci FILE --renovate FILE --codecov FILE --sonar FILE
 
 # Write to file
 python3 scripts/generate_report.py prs reports/open-prs.json -o reports/pr-dashboard.md
@@ -115,7 +140,7 @@ python3 scripts/generate_report.py prs reports/open-prs.json -o reports/pr-dashb
 ## run_guardian_check.py
 
 ```bash
-# Daily (PRs + CI + Dependencies)
+# Daily (PRs + CI + Dependencies + Coverage)
 python3 scripts/run_guardian_check.py --mode daily
 
 # Weekly (Daily + SonarCloud)

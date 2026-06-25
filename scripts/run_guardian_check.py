@@ -26,6 +26,7 @@ SCRIPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)))
 REPORTS_DIR = os.path.join(os.path.dirname(SCRIPTS_DIR), "reports")
 DEFAULT_REPOS_FILE = os.path.join(os.path.dirname(SCRIPTS_DIR), "config", "repos.json")
 DEFAULT_SONAR_CONFIG = os.path.join(os.path.dirname(SCRIPTS_DIR), "config", "sonar.json")
+DEFAULT_CODECOV_CONFIG = os.path.join(os.path.dirname(SCRIPTS_DIR), "config", "codecov.json")
 
 
 def run_script(script_name, args, output_file):
@@ -100,6 +101,8 @@ def main():
                         help="Path to repos.json")
     parser.add_argument("--sonar-config", default=DEFAULT_SONAR_CONFIG,
                         help="Path to sonar.json")
+    parser.add_argument("--codecov-config", default=DEFAULT_CODECOV_CONFIG,
+                        help="Path to codecov.json")
     parser.add_argument("--reports-dir", default=REPORTS_DIR,
                         help="Directory for output files")
     parser.add_argument("--stale-days", type=int, default=14,
@@ -122,6 +125,7 @@ def main():
     ci_file = os.path.join(args.reports_dir, f"ci-status-{date_str}.json")
     renovate_file = os.path.join(args.reports_dir, f"renovate-prs-{date_str}.json")
     sonar_file = os.path.join(args.reports_dir, f"sonar-gates-{date_str}.json")
+    codecov_file = os.path.join(args.reports_dir, f"codecov-{date_str}.json")
 
     errors = 0
     issues_found = False
@@ -140,6 +144,14 @@ def main():
                       ["--repos-file", args.repos_file],
                       renovate_file):
         errors += 1
+
+    if os.path.exists(args.codecov_config):
+        if not run_script("fetch_codecov.py",
+                          ["--codecov-config", args.codecov_config],
+                          codecov_file):
+            errors += 1
+    else:
+        print(f"WARN: Codecov config not found: {args.codecov_config}", file=sys.stderr)
 
     if include_sonar:
         if os.path.exists(args.sonar_config):
@@ -166,6 +178,10 @@ def main():
         dep_report = os.path.join(args.reports_dir, f"dependency-dashboard-{date_str}.md")
         generate_report("renovate", [renovate_file], dep_report)
 
+    if os.path.exists(codecov_file):
+        cov_report = os.path.join(args.reports_dir, f"codecov-dashboard-{date_str}.md")
+        generate_report("codecov", [codecov_file], cov_report)
+
     if include_sonar and os.path.exists(sonar_file):
         sonar_report = os.path.join(args.reports_dir, f"sonar-dashboard-{date_str}.md")
         generate_report("sonar", [sonar_file], sonar_report)
@@ -177,6 +193,8 @@ def main():
         guardian_args.extend(["--ci", ci_file])
     if os.path.exists(renovate_file):
         guardian_args.extend(["--renovate", renovate_file])
+    if os.path.exists(codecov_file):
+        guardian_args.extend(["--codecov", codecov_file])
     if include_sonar and os.path.exists(sonar_file):
         guardian_args.extend(["--sonar", sonar_file])
 
@@ -187,7 +205,7 @@ def main():
         handoff_report = os.path.join(args.reports_dir, f"handoff-{date_str}.md")
         generate_report("handoff", guardian_args, handoff_report)
 
-    for json_file in [prs_file, ci_file, renovate_file, sonar_file]:
+    for json_file in [prs_file, ci_file, renovate_file, sonar_file, codecov_file]:
         if not os.path.exists(json_file):
             continue
         try:
