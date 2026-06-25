@@ -71,6 +71,8 @@ jobs:
             --sonar reports/sonar-gates.json \
             --correlation reports/correlation.json \
             --output docs/index.html
+        env:
+          GUARDIAN_GH_TOKEN: ${{ secrets.GUARDIAN_GH_TOKEN }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

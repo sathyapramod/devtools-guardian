@@ -718,8 +718,143 @@ def build_correlation_section(correlation_data):
     return section_html("correlation", "Failure Correlation", total, content)
 
 
-def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data=None, codecov_data=None):
+TOOLBAR_CSS = """
+.toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+           gap: 0.75rem; margin-bottom: 1.5rem; padding: 0.75rem 1rem;
+           background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.toolbar-left { display: flex; align-items: center; gap: 0.75rem; }
+.toolbar-right { display: flex; align-items: center; gap: 1rem; font-size: 0.8rem; color: var(--text-muted); }
+.btn { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.9rem;
+       border-radius: 6px; border: 1px solid var(--border); background: var(--surface);
+       color: var(--text); font-size: 0.85rem; cursor: pointer; transition: all 0.15s; }
+.btn:hover { background: var(--border); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary { background: #238636; border-color: #238636; color: #fff; }
+.btn-primary:hover { background: #2ea043; }
+.btn-primary:disabled { background: #238636; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block;
+            animation: pulse 2s ease-in-out infinite; }
+.live-dot.fetching { background: var(--warn); }
+.live-dot.error { background: var(--error); animation: none; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+#refresh-status { font-size: 0.8rem; color: var(--text-muted); }
+#rate-limit { font-size: 0.75rem; color: var(--text-muted); }
+"""
+
+TOOLBAR_JS = """
+const REPO = 'sathyapramod/devtools-guardian';
+const WORKFLOW = 'guardian-daily.yml';
+const MAX_DAILY_TRIGGERS = 12;
+const AUTO_REFRESH_MS = 30 * 60 * 1000;
+const GH_TOKEN = '%GH_TOKEN%';
+
+const REPOS = %REPOS_JSON%;
+
+async function ghApi(endpoint) {
+  const opts = {headers: {'Accept': 'application/vnd.github+json'}};
+  if (GH_TOKEN) opts.headers['Authorization'] = 'Bearer ' + GH_TOKEN;
+  const r = await fetch('https://api.github.com/' + endpoint, opts);
+  if (!r.ok) return null;
+  return r.json();
+}
+
+async function countTodayTriggers() {
+  const today = new Date().toISOString().split('T')[0];
+  const data = await ghApi(
+    'repos/' + REPO + '/actions/workflows/' + WORKFLOW + '/runs?per_page=50&created=>' + today
+  );
+  if (!data || !data.workflow_runs) return 0;
+  return data.workflow_runs.filter(r => r.event === 'workflow_dispatch').length;
+}
+
+async function updateRateLimit() {
+  const count = await countTodayTriggers();
+  const el = document.getElementById('rate-limit');
+  if (el) el.textContent = count + '/' + MAX_DAILY_TRIGGERS + ' refreshes today';
+  const btn = document.getElementById('refresh-btn');
+  if (btn && count >= MAX_DAILY_TRIGGERS) {
+    btn.disabled = true;
+    btn.title = 'Daily limit reached';
+  }
+  return count;
+}
+
+async function triggerRefresh() {
+  const btn = document.getElementById('refresh-btn');
+  const status = document.getElementById('refresh-status');
+  if (!GH_TOKEN) { status.textContent = 'No token configured'; return; }
+
+  const count = await countTodayTriggers();
+  if (count >= MAX_DAILY_TRIGGERS) { status.textContent = 'Daily limit reached (' + MAX_DAILY_TRIGGERS + ')'; return; }
+
+  btn.disabled = true;
+  status.textContent = 'Triggering full scan...';
+
+  try {
+    const r = await fetch('https://api.github.com/repos/' + REPO + '/actions/workflows/' + WORKFLOW + '/dispatches', {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + GH_TOKEN, 'Accept': 'application/vnd.github+json'},
+      body: JSON.stringify({ref: 'main'})
+    });
+    if (r.status === 204) {
+      status.textContent = 'Scan triggered — dashboard will update in ~3 min';
+      setTimeout(() => location.reload(), 180000);
+    } else {
+      status.textContent = 'Failed (HTTP ' + r.status + ')';
+    }
+  } catch (e) {
+    status.textContent = 'Error: ' + e.message;
+  }
+  setTimeout(() => { btn.disabled = false; updateRateLimit(); }, 5000);
+}
+
+async function fetchLiveStatus() {
+  const dot = document.getElementById('live-dot');
+  const liveTime = document.getElementById('live-time');
+  if (dot) dot.className = 'live-dot fetching';
+
+  let ciOk = 0, ciFail = 0;
+  for (const repo of REPOS) {
+    try {
+      const data = await ghApi('repos/' + repo.owner + '/' + repo.repo + '/actions/runs?per_page=1&branch=' + (repo.default_branch || 'main'));
+      if (data && data.workflow_runs && data.workflow_runs.length > 0) {
+        const run = data.workflow_runs[0];
+        if (run.conclusion === 'failure') ciFail++;
+        else if (run.conclusion === 'success') ciOk++;
+      }
+    } catch(e) {}
+  }
+
+  const ciCard = document.querySelector('#live-ci-count');
+  if (ciCard) ciCard.textContent = ciFail + ' failing, ' + ciOk + ' passing';
+
+  if (dot) dot.className = 'live-dot';
+  if (liveTime) liveTime.textContent = 'Live: ' + new Date().toLocaleTimeString();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  updateRateLimit();
+  if (GH_TOKEN) fetchLiveStatus();
+  setInterval(() => { if (GH_TOKEN) fetchLiveStatus(); }, AUTO_REFRESH_MS);
+});
+"""
+
+
+def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data=None, codecov_data=None, gh_token=""):
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    repos_list = []
+    if ci_data:
+        for repo in ci_data.get("results", []):
+            repos_list.append({
+                "owner": repo.get("owner", ""),
+                "repo": repo.get("repo", ""),
+                "default_branch": repo.get("branch", "main"),
+            })
+
+    js = TOOLBAR_JS.replace("%GH_TOKEN%", esc(gh_token)).replace(
+        "%REPOS_JSON%", json.dumps(repos_list)
+    )
 
     health_cards = build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_data)
     repo_status_section = build_repo_status_section(ci_data, prs_data, codecov_data)
@@ -728,10 +863,21 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
     pr_section = build_pr_section(prs_data)
     codecov_section = build_codecov_section(codecov_data)
     renovate_section = build_renovate_section(renovate_data)
-    codecov_section = build_codecov_section(codecov_data)
     sonar_section = build_sonar_section(sonar_data)
 
     sections = "\n".join(s for s in [repo_status_section, ci_section, correlation_section, pr_section, codecov_section, renovate_section, sonar_section] if s)
+
+    toolbar_html = """<div class="toolbar">
+  <div class="toolbar-left">
+    <button class="btn btn-primary" id="refresh-btn" onclick="triggerRefresh()">Refresh Data</button>
+    <span id="refresh-status"></span>
+  </div>
+  <div class="toolbar-right">
+    <span><span class="live-dot" id="live-dot"></span> <span id="live-time">Live: --</span></span>
+    <span id="live-ci-count"></span>
+    <span id="rate-limit">--/12 refreshes today</span>
+  </div>
+</div>"""
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -739,11 +885,14 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guardian Dashboard — Ansible Devtools</title>
-<style>{CSS}</style>
+<style>{CSS}
+{TOOLBAR_CSS}</style>
 </head>
 <body>
 <h1>Guardian Dashboard</h1>
-<p class="subtitle">Ansible Devtools — Last updated: {esc(now_str)}</p>
+<p class="subtitle">Ansible Devtools — Full scan: {esc(now_str)}</p>
+
+{toolbar_html}
 
 {health_cards}
 
@@ -752,6 +901,7 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
 <p class="subtitle" style="margin-top:2rem; text-align:center;">
   Generated by devtools-guardian
 </p>
+<script>{js}</script>
 </body>
 </html>
 """
@@ -765,7 +915,7 @@ def main():
     parser.add_argument("--sonar", help="SonarCloud quality gate JSON file")
     parser.add_argument("--codecov", help="Codecov coverage JSON file")
     parser.add_argument("--correlation", help="Failure correlation JSON file")
-    parser.add_argument("--codecov", help="Codecov coverage JSON file")
+    parser.add_argument("--gh-token", help="GitHub PAT for refresh button (or set GUARDIAN_GH_TOKEN env var)")
     parser.add_argument("--output", "-o", default="docs/index.html",
                         help="Output HTML file (default: docs/index.html)")
     args = parser.parse_args()
@@ -776,13 +926,13 @@ def main():
     sonar_data = load_json_safe(args.sonar)
     codecov_data = load_json_safe(args.codecov)
     correlation_data = load_json_safe(args.correlation)
-    codecov_data = load_json_safe(args.codecov)
 
     if not any([prs_data, ci_data, renovate_data, sonar_data, codecov_data]):
         print("ERROR: No data files provided or loadable", file=sys.stderr)
         sys.exit(1)
 
-    html = generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data, codecov_data)
+    gh_token = args.gh_token or os.environ.get("GUARDIAN_GH_TOKEN", "")
+    html = generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data, codecov_data, gh_token)
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, "w") as f:
