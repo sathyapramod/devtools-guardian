@@ -395,55 +395,6 @@ def build_sonar_section(sonar_data):
     return section_html("sonar", "SonarCloud Quality", total, content, collapsed=True)
 
 
-def build_codecov_section(codecov_data):
-    if not codecov_data:
-        return ""
-
-    results = codecov_data.get("results", [codecov_data])
-
-    rows = ""
-    for repo in results:
-        slug = f"{repo.get('owner', '?')}/{repo.get('repo', '?')}"
-        coverage = repo.get("coverage")
-
-        if repo.get("error"):
-            rows += f'<tr><td>{esc(slug)}</td><td colspan="4">Error fetching data</td></tr>'
-            continue
-
-        if coverage is None:
-            rows += f'<tr><td>{esc(slug)}</td><td>N/A</td><td>-</td><td>-</td><td>-</td></tr>'
-            continue
-
-        cov_cls = "ok" if coverage >= 80 else ("warn" if coverage >= 50 else "error")
-        rows += (
-            f"<tr>"
-            f"<td>{esc(slug)}</td>"
-            f'<td><span class="status {cov_cls}">{coverage}%</span></td>'
-            f"<td>{repo.get('lines', 0):,}</td>"
-            f"<td>{repo.get('hits', 0):,}</td>"
-            f"<td>{repo.get('misses', 0):,}</td>"
-            f"</tr>"
-        )
-
-    content = f'''<table>
-<thead><tr><th>Repository</th><th>Coverage</th><th>Lines</th><th>Hits</th><th>Misses</th></tr></thead>
-<tbody>{rows}</tbody>
-</table>'''
-
-    agg = codecov_data.get("aggregate", {})
-    if agg:
-        content = (
-            f'<p style="margin-bottom:1rem; font-size:0.9rem;">'
-            f'Average: <strong>{agg.get("average_coverage", 0)}%</strong> · '
-            f'{agg.get("repos_above_80", 0)} repos above 80% · '
-            f'{agg.get("repos_below_50", 0)} repos below 50%'
-            f'</p>'
-        ) + content
-
-    total = codecov_data.get("total_repos", len(results))
-    return section_html("codecov", "Codecov Coverage", total, content, collapsed=True)
-
-
 CSS = """
 :root {
   --bg: #0d1117; --surface: #161b22; --border: #30363d;
