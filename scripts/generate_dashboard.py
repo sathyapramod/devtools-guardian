@@ -395,6 +395,55 @@ def build_sonar_section(sonar_data):
     return section_html("sonar", "SonarCloud Quality", total, content, collapsed=True)
 
 
+def build_codecov_section(codecov_data):
+    if not codecov_data:
+        return ""
+
+    results = codecov_data.get("results", [codecov_data])
+
+    rows = ""
+    for repo in results:
+        slug = f"{repo.get('owner', '?')}/{repo.get('repo', '?')}"
+        coverage = repo.get("coverage")
+
+        if repo.get("error"):
+            rows += f'<tr><td>{esc(slug)}</td><td colspan="4">Error fetching data</td></tr>'
+            continue
+
+        if coverage is None:
+            rows += f'<tr><td>{esc(slug)}</td><td>N/A</td><td>-</td><td>-</td><td>-</td></tr>'
+            continue
+
+        cov_cls = "ok" if coverage >= 80 else ("warn" if coverage >= 50 else "error")
+        rows += (
+            f"<tr>"
+            f"<td>{esc(slug)}</td>"
+            f'<td><span class="status {cov_cls}">{coverage}%</span></td>'
+            f"<td>{repo.get('lines', 0):,}</td>"
+            f"<td>{repo.get('hits', 0):,}</td>"
+            f"<td>{repo.get('misses', 0):,}</td>"
+            f"</tr>"
+        )
+
+    content = f'''<table>
+<thead><tr><th>Repository</th><th>Coverage</th><th>Lines</th><th>Hits</th><th>Misses</th></tr></thead>
+<tbody>{rows}</tbody>
+</table>'''
+
+    agg = codecov_data.get("aggregate", {})
+    if agg:
+        content = (
+            f'<p style="margin-bottom:1rem; font-size:0.9rem;">'
+            f'Average: <strong>{agg.get("average_coverage", 0)}%</strong> · '
+            f'{agg.get("repos_above_80", 0)} repos above 80% · '
+            f'{agg.get("repos_below_50", 0)} repos below 50%'
+            f'</p>'
+        ) + content
+
+    total = codecov_data.get("total_repos", len(results))
+    return section_html("codecov", "Codecov Coverage", total, content, collapsed=True)
+
+
 CSS = """
 :root {
   --bg: #0d1117; --surface: #161b22; --border: #30363d;
@@ -679,6 +728,7 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
     pr_section = build_pr_section(prs_data)
     codecov_section = build_codecov_section(codecov_data)
     renovate_section = build_renovate_section(renovate_data)
+    codecov_section = build_codecov_section(codecov_data)
     sonar_section = build_sonar_section(sonar_data)
 
     sections = "\n".join(s for s in [repo_status_section, ci_section, correlation_section, pr_section, codecov_section, renovate_section, sonar_section] if s)
@@ -715,6 +765,7 @@ def main():
     parser.add_argument("--sonar", help="SonarCloud quality gate JSON file")
     parser.add_argument("--codecov", help="Codecov coverage JSON file")
     parser.add_argument("--correlation", help="Failure correlation JSON file")
+    parser.add_argument("--codecov", help="Codecov coverage JSON file")
     parser.add_argument("--output", "-o", default="docs/index.html",
                         help="Output HTML file (default: docs/index.html)")
     args = parser.parse_args()
@@ -725,6 +776,7 @@ def main():
     sonar_data = load_json_safe(args.sonar)
     codecov_data = load_json_safe(args.codecov)
     correlation_data = load_json_safe(args.correlation)
+    codecov_data = load_json_safe(args.codecov)
 
     if not any([prs_data, ci_data, renovate_data, sonar_data, codecov_data]):
         print("ERROR: No data files provided or loadable", file=sys.stderr)
