@@ -13,7 +13,6 @@
     {"owner": "ansible", "repo": "molecule"},
     {"owner": "ansible", "repo": "pytest-ansible"},
     {"owner": "ansible", "repo": "tox-ansible"},
-    {"owner": "ansible", "repo": "vscode-ansible"},
-    {"owner": "ansible", "repo": "ansible-backstage-plugins"}
+    {"owner": "ansible", "repo": "vscode-ansible"}
   ]
 }
