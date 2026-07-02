@@ -18,13 +18,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 GH_TOKEN = os.environ.get("GH_TOKEN", "")
@@ -108,7 +108,8 @@ def gh_graphql(query: str, variables: dict | None = None) -> dict:
 def fetch_merged_prs(owner: str, repo: str, since: str) -> list[dict]:
     """Fetch recently merged PRs."""
     query = f"repo:{owner}/{repo} is:pr is:merged merged:>={since}"
-    data = gh_api(f"search/issues?q={query}&sort=updated&order=desc")
+    encoded_query = quote(query, safe="")
+    data = gh_api(f"search/issues?q={encoded_query}&sort=updated&order=desc")
     if isinstance(data, dict):
         return data.get("items", [])
     return []
