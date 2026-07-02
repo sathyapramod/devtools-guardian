@@ -54,6 +54,11 @@ jobs:
       - name: Fetch Codecov coverage
         run: python3 scripts/fetch_codecov.py --codecov-config config/codecov.json > reports/codecov.json
 
+      - name: Fetch SonarCloud quality gates
+        run: python3 scripts/fetch_sonar_gates.py --sonar-config config/sonar.json > reports/sonar-gates.json
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
       - name: Correlate CI failures
         run: python3 scripts/correlate_failures.py --ci reports/ci-status.json --renovate reports/renovate-prs.json -o reports/correlation.json
 
@@ -64,6 +69,7 @@ jobs:
             --ci reports/ci-status.json \
             --renovate reports/renovate-prs.json \
             --codecov reports/codecov.json \
+            --sonar reports/sonar-gates.json \
             --correlation reports/correlation.json \
             --output docs/index.html
         env:

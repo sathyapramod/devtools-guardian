@@ -61,6 +61,11 @@ jobs:
       - name: Correlate CI failures
         run: python3 scripts/correlate_failures.py --ci reports/ci-status.json --renovate reports/renovate-prs.json -o reports/correlation.json
 
+      - name: Fetch supply-chain audit
+        run: python3 scripts/fetch_supply_chain.py --repos-file config/repos.json --days 14 -o reports/supply-chain.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Generate HTML dashboard
         run: |
           python3 scripts/generate_dashboard.py \
@@ -70,6 +75,7 @@ jobs:
             --codecov reports/codecov.json \
             --sonar reports/sonar-gates.json \
             --correlation reports/correlation.json \
+            --supply-chain reports/supply-chain.json \
             --output docs/index.html
         env:
           GUARDIAN_GH_TOKEN: ${{ secrets.GUARDIAN_GH_TOKEN }}
