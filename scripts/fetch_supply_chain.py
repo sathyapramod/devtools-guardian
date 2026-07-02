@@ -429,8 +429,8 @@ def process_repo(owner: str, repo: str, since: str, scan_vulns: bool = True) -> 
 def main():
     parser = argparse.ArgumentParser(description="Fetch supply-chain audit data")
     parser.add_argument("--repos-file", required=True, help="Path to repos.json config")
-    parser.add_argument("--days", type=int, default=14,
-                        help="Look back N days for merged PRs (default: 14)")
+    parser.add_argument("--days", type=int, default=7,
+                        help="Look back N days for merged PRs (default: 7)")
     parser.add_argument("--skip-vulns", action="store_true",
                         help="Skip vulnerability scanning (faster)")
     parser.add_argument("--output", "-o", help="Output file (default: stdout)")
