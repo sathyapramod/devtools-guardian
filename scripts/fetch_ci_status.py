@@ -4,10 +4,14 @@ Fetch GitHub Actions workflow status across Ansible Devtools repositories.
 Reports the latest run status for each workflow on the default branch,
 identifies failing jobs, and detects flaky workflows (alternating pass/fail).
 
+Supports filtering by event type (e.g. --event schedule) to track scheduled
+CI health separately, matching the official Ansible DevTools status page.
+
 Usage:
     python3 scripts/fetch_ci_status.py ansible ansible-lint
     python3 scripts/fetch_ci_status.py --repos-file config/repos.json
     python3 scripts/fetch_ci_status.py --repos-file config/repos.json --days 3
+    python3 scripts/fetch_ci_status.py --repos-file config/repos.json --event schedule
 """
 
 import argparse
@@ -81,22 +85,54 @@ def get_failing_jobs(owner, repo, run_id):
     return failing
 
 
-def fetch_repo_ci(owner, repo, branch, days):
+def fetch_primary_ci_status(owner, repo, branch, ci_workflow):
+    """Fetch the status of the primary CI workflow using schedule events.
+
+    This matches what the official Ansible DevTools status page tracks:
+    each repo's main CI workflow filtered by event=schedule.
+    """
+    if not ci_workflow:
+        return None
+
+    data = gh_api(
+        f"repos/{owner}/{repo}/actions/workflows/{ci_workflow}/runs"
+        f"?branch={branch}&event=schedule&per_page=1&status=completed"
+    )
+
+    if not data or not data.get("workflow_runs"):
+        return {"status": "unknown", "workflow": ci_workflow}
+
+    run = data["workflow_runs"][0]
+    return {
+        "status": run.get("conclusion", "unknown"),
+        "workflow": ci_workflow,
+        "run_id": run.get("id"),
+        "url": run.get("html_url", ""),
+        "updated_at": run.get("updated_at", ""),
+    }
+
+
+def fetch_repo_ci(owner, repo, branch, days, event=None, ci_workflow=None):
     """Fetch CI status for a single repo."""
     print(f"\nFetching CI for {owner}/{repo}...", file=sys.stderr)
 
     since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    data = gh_api(
+    endpoint = (
         f"repos/{owner}/{repo}/actions/runs"
         f"?branch={branch}&per_page=100&created=%3E{since}"
     )
+    if event:
+        endpoint += f"&event={event}"
+
+    data = gh_api(endpoint)
 
     if data is None or "workflow_runs" not in data:
         return {
             "owner": owner, "repo": repo, "branch": branch,
             "error": "Failed to fetch workflow runs",
             "workflows": [],
+            "primary_ci": None,
             "summary": {"total": 0, "passing": 0, "failing": 0, "flaky": 0},
         }
 
@@ -141,6 +177,7 @@ def fetch_repo_ci(owner, repo, branch, days):
             "status": status,
             "conclusion": conclusion or status,
             "url": run.get("html_url", ""),
+            "event": run.get("event", ""),
             "updated_at": updated,
             "age_hours": age_hours,
             "head_sha": run.get("head_sha", "")[:7],
@@ -152,11 +189,14 @@ def fetch_repo_ci(owner, repo, branch, days):
     failing = sum(1 for w in workflows if w["conclusion"] == "failure" and not w["is_flaky"])
     flaky = sum(1 for w in workflows if w["is_flaky"])
 
+    primary_ci = fetch_primary_ci_status(owner, repo, branch, ci_workflow)
+
     return {
         "owner": owner, "repo": repo, "branch": branch,
         "fetched_at": now.isoformat(),
         "error": None,
         "workflows": workflows,
+        "primary_ci": primary_ci,
         "summary": {
             "total": len(workflows),
             "passing": passing,
@@ -181,6 +221,8 @@ def main():
                         help="Branch to check (default: from repos.json or main)")
     parser.add_argument("--days", type=int, default=3,
                         help="Days of history to check (default: 3)")
+    parser.add_argument("--event", default=None,
+                        help="Filter runs by event type (e.g. schedule, push)")
     args = parser.parse_args()
 
     if args.repos_file:
@@ -188,12 +230,24 @@ def main():
         results = []
         for r in repos:
             branch = args.branch or r.get("default_branch", "main")
-            result = fetch_repo_ci(r["owner"], r["repo"], branch, args.days)
+            ci_workflow = r.get("ci_workflow")
+            result = fetch_repo_ci(r["owner"], r["repo"], branch, args.days,
+                                   event=args.event, ci_workflow=ci_workflow)
             results.append(result)
+
+        primary_passing = sum(
+            1 for r in results
+            if r.get("primary_ci") and r["primary_ci"].get("status") == "success"
+        )
+        primary_failing = sum(
+            1 for r in results
+            if r.get("primary_ci") and r["primary_ci"].get("status") == "failure"
+        )
 
         output = {
             "mode": "batch",
             "total_repos": len(repos),
+            "event_filter": args.event,
             "results": results,
             "aggregate": {
                 "total_workflows": sum(r["summary"]["total"] for r in results),
@@ -205,11 +259,13 @@ def main():
                     1 for r in results
                     if not r["error"] and r["summary"]["failing"] == 0 and r["summary"]["flaky"] == 0
                 ),
+                "primary_ci_passing": primary_passing,
+                "primary_ci_failing": primary_failing,
             },
         }
     elif args.owner and args.repo:
         branch = args.branch or "main"
-        output = fetch_repo_ci(args.owner, args.repo, branch, args.days)
+        output = fetch_repo_ci(args.owner, args.repo, branch, args.days, event=args.event)
     else:
         parser.error("Provide OWNER REPO or --repos-file")
         return

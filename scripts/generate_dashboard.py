@@ -77,7 +77,7 @@ def section_html(section_id, title, count, content, collapsed=False):
 </details>'''
 
 
-def build_health_cards(prs_data, ci_data, renovate_data, sonar_data):
+def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_data=None, supply_chain_data=None):
     cards = []
 
     if ci_data:
@@ -110,6 +110,16 @@ def build_health_cards(prs_data, ci_data, renovate_data, sonar_data):
     else:
         cards.append(card_html("Dependencies", "UNKNOWN", "No data"))
 
+    if codecov_data:
+        agg = codecov_data.get("aggregate", {})
+        avg_cov = agg.get("average_coverage", 0)
+        below_50 = agg.get("repos_below_50", 0)
+        above_80 = agg.get("repos_above_80", 0)
+        status = "OK" if below_50 == 0 else ("WARN" if avg_cov >= 50 else "ERROR")
+        cards.append(card_html("Code Coverage", status, f"{avg_cov}% avg, {above_80} above 80%"))
+    else:
+        cards.append(card_html("Code Coverage", "UNKNOWN", "No data"))
+
     if sonar_data:
         agg = sonar_data.get("aggregate", {})
         gate_fail = agg.get("gate_error", 0)
@@ -119,6 +129,17 @@ def build_health_cards(prs_data, ci_data, renovate_data, sonar_data):
         cards.append(card_html("SonarCloud", status, f"{gate_ok} passing, {gate_fail} failing, {vulns} vulns"))
     else:
         cards.append(card_html("SonarCloud", "UNKNOWN", "No data"))
+
+    if supply_chain_data:
+        agg = supply_chain_data.get("aggregate", {})
+        critical = agg.get("critical_findings", 0)
+        post_appr = agg.get("total_post_approval", 0)
+        bot_only = agg.get("total_bot_only", 0)
+        total = post_appr + bot_only
+        status = "ERROR" if critical > 0 else ("WARN" if total > 0 else "OK")
+        cards.append(card_html("Supply Chain", status, f"{post_appr} post-approval, {bot_only} bot-only"))
+    else:
+        cards.append(card_html("Supply Chain", "UNKNOWN", "No data"))
 
     return '<div class="cards">' + "\n".join(cards) + "</div>"
 
@@ -403,7 +424,7 @@ h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
 a { color: var(--link); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem;
         border-left: 4px solid var(--neutral); }
 .card.ok { border-left-color: var(--ok); background: var(--ok-bg); }
@@ -445,11 +466,238 @@ li { margin-bottom: 0.3rem; font-size: 0.9rem; }
 
 @media (max-width: 600px) {
   body { padding: 0.75rem; }
-  .cards { grid-template-columns: 1fr 1fr; }
+  .cards { grid-template-columns: repeat(2, 1fr); gap: 0.5rem; }
   table { font-size: 0.75rem; }
   td, th { padding: 0.35rem; }
 }
 """
+
+
+def build_repo_status_section(ci_data, prs_data, codecov_data):
+    """Build a per-repo status overview grid matching the official DevTools status page.
+
+    Shows CI status, coverage, and open PR count for each repo at a glance.
+    """
+    ci_by_repo = {}
+    if ci_data:
+        for repo in ci_data.get("results", []):
+            slug = f"{repo.get('owner', '?')}/{repo.get('repo', '?')}"
+            ci_by_repo[slug] = repo
+
+    pr_count_by_repo = {}
+    if prs_data:
+        for repo in prs_data.get("results", []):
+            slug = f"{repo.get('owner', '?')}/{repo.get('repo', '?')}"
+            s = repo.get("summary", {})
+            pr_count_by_repo[slug] = s.get("total", 0)
+
+    cov_by_repo = {}
+    if codecov_data:
+        for repo in codecov_data.get("results", []):
+            slug = f"{repo.get('owner', '?')}/{repo.get('repo', '?')}"
+            cov_by_repo[slug] = repo
+
+    all_slugs = sorted(set(list(ci_by_repo.keys()) + list(pr_count_by_repo.keys()) + list(cov_by_repo.keys())))
+
+    if not all_slugs:
+        return ""
+
+    rows = ""
+    for slug in all_slugs:
+        ci_repo = ci_by_repo.get(slug, {})
+        primary = ci_repo.get("primary_ci")
+        ci_s = ci_repo.get("summary", {})
+
+        ci_workflow = ci_repo.get("primary_ci", {}).get("workflow", "") if ci_repo.get("primary_ci") else ""
+        ci_actions_url = f"https://github.com/{slug}/actions/workflows/{ci_workflow}?query=event%3Aschedule" if ci_workflow else f"https://github.com/{slug}/actions"
+
+        if primary:
+            ci_st = primary.get("status", "unknown")
+            ci_cls = "ok" if ci_st == "success" else ("error" if ci_st == "failure" else "neutral")
+            ci_label = primary.get("workflow", "CI")
+            ci_cell = f'<a href="{esc(ci_actions_url)}" target="_blank"><span class="status {ci_cls}">{esc(ci_label)}</span></a>'
+        elif ci_s:
+            failing = ci_s.get("failing", 0)
+            ci_cls = "ok" if failing == 0 else "error"
+            ci_cell = f'<a href="{esc(ci_actions_url)}" target="_blank"><span class="status {ci_cls}">{"Pass" if failing == 0 else "Fail"}</span></a>'
+        else:
+            ci_cell = f'<a href="{esc(ci_actions_url)}" target="_blank"><span class="status neutral">N/A</span></a>'
+
+        cov_repo = cov_by_repo.get(slug, {})
+        coverage = cov_repo.get("coverage")
+        codecov_url = f"https://codecov.io/github/{slug}"
+        if coverage is not None:
+            cov_cls = "ok" if coverage >= 80 else ("warn" if coverage >= 50 else "error")
+            cov_cell = f'<a href="{esc(codecov_url)}" target="_blank"><span class="status {cov_cls}">{coverage}%</span></a>'
+        else:
+            cov_cell = '<span class="status neutral">N/A</span>'
+
+        pr_count = pr_count_by_repo.get(slug, 0)
+        pr_cls = "ok" if pr_count <= 3 else ("warn" if pr_count <= 8 else "error")
+        prs_url = f"https://github.com/{slug}/pulls?q=sort%3Aupdated-desc+is%3Apr+is%3Aopen+-is%3Adraft"
+        pr_cell = f'<a href="{esc(prs_url)}" target="_blank"><span class="status {pr_cls}">{pr_count} PRs</span></a>'
+
+        owner_repo = slug.split("/", 1)
+        repo_name = owner_repo[1] if len(owner_repo) > 1 else slug
+        repo_url = f"https://github.com/{slug}"
+        rows += (
+            f'<tr>'
+            f'<td><a href="{esc(repo_url)}" target="_blank">{esc(repo_name)}</a></td>'
+            f'<td>{ci_cell}</td>'
+            f'<td>{cov_cell}</td>'
+            f'<td>{pr_cell}</td>'
+            f'</tr>'
+        )
+
+    content = f'''<table>
+<thead><tr><th>Repository</th><th>CI Status</th><th>Coverage</th><th>Open PRs</th></tr></thead>
+<tbody>{rows}</tbody>
+</table>'''
+
+    return section_html("repo-status", "Repository Status", len(all_slugs), content)
+
+
+def build_codecov_section(codecov_data):
+    """Build the Code Coverage section from Codecov data."""
+    if not codecov_data:
+        return ""
+
+    results = codecov_data.get("results", [])
+    if not results:
+        return ""
+
+    results_sorted = sorted(results, key=lambda r: r.get("coverage") or 0)
+
+    rows = ""
+    for repo in results_sorted:
+        slug = f"{repo.get('owner', '?')}/{repo.get('repo', '?')}"
+
+        codecov_url = f"https://codecov.io/github/{slug}"
+        repo_url = f"https://github.com/{slug}"
+
+        if repo.get("error"):
+            rows += f'<tr class="error"><td><a href="{esc(repo_url)}" target="_blank">{esc(slug)}</a></td><td colspan="4">Error fetching data</td></tr>'
+            continue
+
+        coverage = repo.get("coverage")
+        if coverage is not None:
+            cov_cls = "ok" if coverage >= 80 else ("warn" if coverage >= 50 else "error")
+            coverage_str = f'<a href="{esc(codecov_url)}" target="_blank"><span class="status {cov_cls}">{coverage}%</span></a>'
+        else:
+            coverage_str = '<span class="status neutral">N/A</span>'
+
+        lines = repo.get("lines", 0)
+        hits = repo.get("hits", 0)
+        misses = repo.get("misses", 0)
+
+        rows += (
+            f'<tr>'
+            f'<td><a href="{esc(repo_url)}" target="_blank">{esc(slug)}</a></td>'
+            f'<td>{coverage_str}</td>'
+            f'<td>{lines:,}</td>'
+            f'<td>{hits:,}</td>'
+            f'<td>{misses:,}</td>'
+            f'</tr>'
+        )
+
+    content = f'''<table>
+<thead><tr><th>Repository</th><th>Coverage</th><th>Lines</th><th>Hits</th><th>Misses</th></tr></thead>
+<tbody>{rows}</tbody>
+</table>'''
+
+    agg = codecov_data.get("aggregate", {})
+    below_50 = agg.get("repos_below_50", 0)
+    if below_50 > 0:
+        low_cov = [r for r in results if not r.get("error") and r.get("coverage") is not None and r["coverage"] < 50]
+        if low_cov:
+            details = "".join(
+                f"<li><strong>{esc(r.get('owner', '?'))}/{esc(r.get('repo', '?'))}</strong> — {r['coverage']}%</li>"
+                for r in low_cov
+            )
+            content = f"<h3>Low Coverage ({below_50} repos below 50%)</h3><ul>{details}</ul>" + content
+
+    total = codecov_data.get("total_repos", len(results))
+    return section_html("codecov", "Code Coverage (Codecov)", total, content, collapsed=True)
+
+
+def build_supply_chain_section(sc_data):
+    """Build the Supply Chain Audit section showing post-approval commits,
+    bot-only approvals, and known vulnerabilities."""
+    if not sc_data:
+        return ""
+
+    results = sc_data.get("results", [])
+    agg = sc_data.get("aggregate", {})
+    days = sc_data.get("days", 14)
+
+    all_post_approval = []
+    all_bot_only = []
+
+    for repo in results:
+        slug = f"{repo.get('owner', '?')}/{repo.get('repo', '?')}"
+        for f in repo.get("post_approval", []):
+            f["_repo"] = slug
+            all_post_approval.append(f)
+        for f in repo.get("bot_only", []):
+            f["_repo"] = slug
+            all_bot_only.append(f)
+
+    content = f'<p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem;">Last {days} days of merged PRs scanned across {agg.get("repos_scanned", 0)} repos.</p>'
+
+    # --- Post-Approval Commits ---
+    if all_post_approval:
+        all_post_approval.sort(key=lambda f: (0 if f.get("risk") == "critical" else (1 if f.get("risk") == "high" else 2)))
+        rows = ""
+        for f in all_post_approval:
+            risk_cls = "error" if f["risk"] in ("critical", "high") else "warn"
+            pr_url = f.get("pr_url", "")
+            pr_link = f'<a href="{esc(pr_url)}" target="_blank">#{f["pr_number"]}</a>' if pr_url else f'#{f["pr_number"]}'
+            commit_info = ", ".join(
+                f'{c["sha"]} by {c["author"]}' for c in f.get("commits", [])[:3]
+            )
+            rows += (
+                f"<tr>"
+                f"<td>{esc(f['_repo'])}</td>"
+                f"<td>{pr_link}</td>"
+                f"<td>{esc(f.get('pr_title', '')[:50])}</td>"
+                f"<td>{esc(f.get('pr_author', ''))}</td>"
+                f'<td><span class="status {risk_cls}">{f["post_approval_count"]} commits</span></td>'
+                f"<td>{esc(f.get('last_approver', ''))}</td>"
+                f"<td>{esc(commit_info)}</td>"
+                f"</tr>"
+            )
+        content += f'''<h3>Post-Approval Commits ({len(all_post_approval)})</h3>
+<table><thead><tr><th>Repo</th><th>PR</th><th>Title</th><th>Author</th><th>After Approval</th><th>Approver</th><th>Commits</th></tr></thead>
+<tbody>{rows}</tbody></table>'''
+
+    # --- Bot-Only Approvals ---
+    if all_bot_only:
+        all_bot_only.sort(key=lambda f: (0 if f.get("risk") == "high" else (1 if f.get("risk") == "medium" else 2)))
+        rows = ""
+        for f in all_bot_only:
+            risk_cls = "error" if f["risk"] == "high" else ("warn" if f["risk"] == "medium" else "neutral")
+            pr_url = f.get("pr_url", "")
+            pr_link = f'<a href="{esc(pr_url)}" target="_blank">#{f["pr_number"]}</a>' if pr_url else f'#{f["pr_number"]}'
+            bots = ", ".join(f.get("bot_approvers", []))
+            rows += (
+                f"<tr>"
+                f"<td>{esc(f['_repo'])}</td>"
+                f"<td>{pr_link}</td>"
+                f"<td>{esc(f.get('pr_title', '')[:50])}</td>"
+                f"<td>{esc(f.get('pr_author', ''))}</td>"
+                f'<td><span class="status {risk_cls}">{esc(bots)}</span></td>'
+                f"<td>{'Yes' if f.get('is_bot_pr') else 'No'}</td>"
+                f"</tr>"
+            )
+        content += f'''<h3>Bot-Only Approvals ({len(all_bot_only)})</h3>
+<table><thead><tr><th>Repo</th><th>PR</th><th>Title</th><th>Author</th><th>Approved By</th><th>Bot PR?</th></tr></thead>
+<tbody>{rows}</tbody></table>'''
+
+    if not all_post_approval and not all_bot_only:
+        content += '<p style="color:var(--ok-text);">No supply-chain findings in this period.</p>'
+
+    total = agg.get("total_post_approval", 0) + agg.get("total_bot_only", 0)
+    return section_html("supply-chain", "Supply Chain Audit", total, content)
 
 
 def build_correlation_section(correlation_data):
@@ -508,21 +756,292 @@ def build_correlation_section(correlation_data):
 <table><thead><tr><th>Repo</th><th>Workflow</th><th>Failing Jobs</th></tr></thead>
 <tbody>{rows}</tbody></table>'''
 
-    total = summary.get("total_failures", 0)
-    return section_html("correlation", "Failure Correlation", total, content)
+    total_failures = summary.get("total_failures", 0)
+    cluster_count = len(clusters)
+    badge_count = cluster_count if cluster_count > 0 else total_failures
+    content = f'<p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem;">{cluster_count} correlated cluster(s) across {total_failures} total failure(s).</p>' + content
+    return section_html("correlation", "Failure Correlation", f"{cluster_count} clusters", content)
 
 
-def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data=None):
+TOOLBAR_CSS = """
+.toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+           gap: 0.75rem; margin-bottom: 1.5rem; padding: 0.75rem 1rem;
+           background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.toolbar-left { display: flex; align-items: center; gap: 0.75rem; }
+.toolbar-right { display: flex; align-items: center; gap: 1rem; font-size: 0.8rem; color: var(--text-muted); }
+.btn { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.9rem;
+       border-radius: 6px; border: 1px solid var(--border); background: var(--surface);
+       color: var(--text); font-size: 0.85rem; cursor: pointer; transition: all 0.15s; }
+.btn:hover { background: var(--border); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary { background: #238636; border-color: #238636; color: #fff; }
+.btn-primary:hover { background: #2ea043; }
+.btn-primary:disabled { background: #238636; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block;
+            animation: pulse 2s ease-in-out infinite; }
+.live-dot.fetching { background: var(--warn); }
+.live-dot.error { background: var(--error); animation: none; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+#refresh-status { font-size: 0.8rem; color: var(--text-muted); }
+#rate-limit { font-size: 0.75rem; color: var(--text-muted); }
+"""
+
+TOOLBAR_JS = """
+const REPO = 'sathyapramod/devtools-guardian';
+const WORKFLOW = 'guardian-daily.yml';
+const MAX_DAILY_TRIGGERS = 12;
+const AUTO_REFRESH_MS = 30 * 60 * 1000;
+const GH_TOKEN = '%GH_TOKEN%';
+
+const REPOS = %REPOS_JSON%;
+
+async function ghApi(endpoint) {
+  const opts = {headers: {'Accept': 'application/vnd.github+json'}};
+  if (GH_TOKEN) opts.headers['Authorization'] = 'Bearer ' + GH_TOKEN;
+  const r = await fetch('https://api.github.com/' + endpoint, opts);
+  if (!r.ok) return null;
+  return r.json();
+}
+
+async function countTodayTriggers() {
+  const today = new Date().toISOString().split('T')[0];
+  const data = await ghApi(
+    'repos/' + REPO + '/actions/workflows/' + WORKFLOW + '/runs?per_page=50&created=>' + today
+  );
+  if (!data || !data.workflow_runs) return 0;
+  return data.workflow_runs.filter(r => r.event === 'workflow_dispatch').length;
+}
+
+async function updateRateLimit() {
+  const count = await countTodayTriggers();
+  const el = document.getElementById('rate-limit');
+  if (el) el.textContent = count + '/' + MAX_DAILY_TRIGGERS + ' refreshes today';
+  const btn = document.getElementById('refresh-btn');
+  if (btn && count >= MAX_DAILY_TRIGGERS) {
+    btn.disabled = true;
+    btn.title = 'Daily limit reached';
+  }
+  return count;
+}
+
+async function triggerRefresh() {
+  const btn = document.getElementById('refresh-btn');
+  const status = document.getElementById('refresh-status');
+  if (!GH_TOKEN) { status.textContent = 'No token configured'; return; }
+
+  const count = await countTodayTriggers();
+  if (count >= MAX_DAILY_TRIGGERS) { status.textContent = 'Daily limit reached (' + MAX_DAILY_TRIGGERS + ')'; return; }
+
+  btn.disabled = true;
+  status.textContent = 'Triggering full scan...';
+
+  try {
+    const r = await fetch('https://api.github.com/repos/' + REPO + '/actions/workflows/' + WORKFLOW + '/dispatches', {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + GH_TOKEN, 'Accept': 'application/vnd.github+json'},
+      body: JSON.stringify({ref: 'main'})
+    });
+    if (r.status === 204) {
+      status.textContent = 'Scan triggered — dashboard will update in ~3 min';
+      setTimeout(() => location.reload(), 180000);
+    } else {
+      status.textContent = 'Failed (HTTP ' + r.status + ')';
+    }
+  } catch (e) {
+    status.textContent = 'Error: ' + e.message;
+  }
+  setTimeout(() => { btn.disabled = false; updateRateLimit(); }, 5000);
+}
+
+async function fetchLiveStatus() {
+  const dot = document.getElementById('live-dot');
+  const liveTime = document.getElementById('live-time');
+  if (dot) dot.className = 'live-dot fetching';
+
+  let ciOk = 0, ciFail = 0;
+  for (const repo of REPOS) {
+    try {
+      const data = await ghApi('repos/' + repo.owner + '/' + repo.repo + '/actions/runs?per_page=1&branch=' + (repo.default_branch || 'main'));
+      if (data && data.workflow_runs && data.workflow_runs.length > 0) {
+        const run = data.workflow_runs[0];
+        if (run.conclusion === 'failure') ciFail++;
+        else if (run.conclusion === 'success') ciOk++;
+      }
+    } catch(e) {}
+  }
+
+  const ciCard = document.querySelector('#live-ci-count');
+  if (ciCard) ciCard.textContent = ciFail + ' failing, ' + ciOk + ' passing';
+
+  if (dot) dot.className = 'live-dot';
+  if (liveTime) liveTime.textContent = 'Live: ' + new Date().toLocaleTimeString();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  updateRateLimit();
+  if (GH_TOKEN) fetchLiveStatus();
+  setInterval(() => { if (GH_TOKEN) fetchLiveStatus(); }, AUTO_REFRESH_MS);
+});
+"""
+
+FILTER_CSS = """
+.filter-bar { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+              margin-bottom: 1rem; padding: 0.6rem 1rem;
+              background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.filter-bar label { font-size: 0.8rem; color: var(--text-muted); }
+.filter-bar select, .filter-bar input {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; padding: 0.35rem 0.6rem; font-size: 0.85rem; }
+.filter-bar select:focus, .filter-bar input:focus { outline: none; border-color: var(--link); }
+.filter-bar input { min-width: 180px; }
+th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
+th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; top: 50%;
+                     transform: translateY(-50%); font-size: 0.7rem; opacity: 0.4; }
+th.sortable.asc::after { content: '↑'; opacity: 1; }
+th.sortable.desc::after { content: '↓'; opacity: 1; }
+tr.filtered-out { display: none; }
+.match-count { font-size: 0.75rem; color: var(--text-muted); margin-left: auto; }
+"""
+
+FILTER_JS = """
+(function() {
+  const tables = document.querySelectorAll('table');
+  const allRepos = new Set();
+
+  tables.forEach(t => {
+    t.querySelectorAll('tbody tr').forEach(row => {
+      const cell = row.cells[0];
+      if (cell) allRepos.add(cell.textContent.trim());
+    });
+  });
+
+  // Build filter bar
+  const bar = document.createElement('div');
+  bar.className = 'filter-bar';
+  bar.id = 'global-filter';
+
+  const label1 = document.createElement('label');
+  label1.textContent = 'Repo:';
+  const sel = document.createElement('select');
+  sel.id = 'repo-filter';
+  const optAll = document.createElement('option');
+  optAll.value = ''; optAll.textContent = 'All repos';
+  sel.appendChild(optAll);
+  [...allRepos].sort().forEach(r => {
+    const o = document.createElement('option');
+    o.value = r; o.textContent = r.split('/').pop();
+    sel.appendChild(o);
+  });
+
+  const label2 = document.createElement('label');
+  label2.textContent = 'Search:';
+  const input = document.createElement('input');
+  input.type = 'text'; input.id = 'text-filter';
+  input.placeholder = 'Filter rows...';
+
+  const countEl = document.createElement('span');
+  countEl.className = 'match-count'; countEl.id = 'filter-count';
+
+  bar.appendChild(label1); bar.appendChild(sel);
+  bar.appendChild(label2); bar.appendChild(input);
+  bar.appendChild(countEl);
+
+  const firstSection = document.querySelector('.section');
+  if (firstSection) firstSection.parentNode.insertBefore(bar, firstSection);
+
+  function applyFilters() {
+    const repo = sel.value.toLowerCase();
+    const text = input.value.toLowerCase();
+    let shown = 0, total = 0;
+
+    tables.forEach(t => {
+      t.querySelectorAll('tbody tr').forEach(row => {
+        total++;
+        const rowText = row.textContent.toLowerCase();
+        const repoMatch = !repo || (row.cells[0] && row.cells[0].textContent.trim().toLowerCase().includes(repo));
+        const textMatch = !text || rowText.includes(text);
+        const visible = repoMatch && textMatch;
+        row.classList.toggle('filtered-out', !visible);
+        if (visible) shown++;
+      });
+    });
+
+    countEl.textContent = text || repo ? shown + '/' + total + ' rows' : '';
+  }
+
+  sel.addEventListener('change', applyFilters);
+  input.addEventListener('input', applyFilters);
+
+  // Column sorting
+  tables.forEach(t => {
+    const headers = t.querySelectorAll('th');
+    headers.forEach((th, colIdx) => {
+      th.classList.add('sortable');
+      th.addEventListener('click', () => {
+        const tbody = t.querySelector('tbody');
+        if (!tbody) return;
+        const rows = [...tbody.querySelectorAll('tr')];
+        const isAsc = th.classList.contains('asc');
+        headers.forEach(h => h.classList.remove('asc', 'desc'));
+        th.classList.add(isAsc ? 'desc' : 'asc');
+
+        rows.sort((a, b) => {
+          const aVal = a.cells[colIdx] ? a.cells[colIdx].textContent.trim() : '';
+          const bVal = b.cells[colIdx] ? b.cells[colIdx].textContent.trim() : '';
+          const aNum = parseFloat(aVal);
+          const bNum = parseFloat(bVal);
+          let cmp;
+          if (!isNaN(aNum) && !isNaN(bNum)) cmp = aNum - bNum;
+          else cmp = aVal.localeCompare(bVal);
+          return isAsc ? -cmp : cmp;
+        });
+        rows.forEach(r => tbody.appendChild(r));
+      });
+    });
+  });
+})();
+"""
+
+
+def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data=None, codecov_data=None, supply_chain_data=None, gh_token=""):
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-    health_cards = build_health_cards(prs_data, ci_data, renovate_data, sonar_data)
+    repos_list = []
+    if ci_data:
+        for repo in ci_data.get("results", []):
+            repos_list.append({
+                "owner": repo.get("owner", ""),
+                "repo": repo.get("repo", ""),
+                "default_branch": repo.get("branch", "main"),
+            })
+
+    js = TOOLBAR_JS.replace("%GH_TOKEN%", esc(gh_token)).replace(
+        "%REPOS_JSON%", json.dumps(repos_list)
+    )
+
+    health_cards = build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_data, supply_chain_data)
+    repo_status_section = build_repo_status_section(ci_data, prs_data, codecov_data)
     ci_section = build_ci_section(ci_data)
     correlation_section = build_correlation_section(correlation_data)
     pr_section = build_pr_section(prs_data)
+    codecov_section = build_codecov_section(codecov_data)
     renovate_section = build_renovate_section(renovate_data)
     sonar_section = build_sonar_section(sonar_data)
+    supply_chain_section = build_supply_chain_section(supply_chain_data)
 
-    sections = "\n".join(s for s in [ci_section, correlation_section, pr_section, renovate_section, sonar_section] if s)
+    sections = "\n".join(s for s in [repo_status_section, ci_section, correlation_section, pr_section, supply_chain_section, codecov_section, renovate_section, sonar_section] if s)
+
+    toolbar_html = """<div class="toolbar">
+  <div class="toolbar-left">
+    <button class="btn btn-primary" id="refresh-btn" onclick="triggerRefresh()">Refresh Data</button>
+    <span id="refresh-status"></span>
+  </div>
+  <div class="toolbar-right">
+    <span><span class="live-dot" id="live-dot"></span> <span id="live-time">Live: --</span></span>
+    <span id="live-ci-count"></span>
+    <span id="rate-limit">--/12 refreshes today</span>
+  </div>
+</div>"""
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -530,11 +1049,15 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guardian Dashboard — Ansible Devtools</title>
-<style>{CSS}</style>
+<style>{CSS}
+{TOOLBAR_CSS}
+{FILTER_CSS}</style>
 </head>
 <body>
 <h1>Guardian Dashboard</h1>
-<p class="subtitle">Ansible Devtools — Last updated: {esc(now_str)}</p>
+<p class="subtitle">Ansible Devtools — Full scan: {esc(now_str)}</p>
+
+{toolbar_html}
 
 {health_cards}
 
@@ -543,6 +1066,8 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
 <p class="subtitle" style="margin-top:2rem; text-align:center;">
   Generated by devtools-guardian
 </p>
+<script>{js}</script>
+<script>{FILTER_JS}</script>
 </body>
 </html>
 """
@@ -554,7 +1079,10 @@ def main():
     parser.add_argument("--ci", help="CI status JSON file")
     parser.add_argument("--renovate", help="Renovate/dependency PR JSON file")
     parser.add_argument("--sonar", help="SonarCloud quality gate JSON file")
+    parser.add_argument("--codecov", help="Codecov coverage JSON file")
     parser.add_argument("--correlation", help="Failure correlation JSON file")
+    parser.add_argument("--supply-chain", dest="supply_chain", help="Supply chain audit JSON file")
+    parser.add_argument("--gh-token", help="GitHub PAT for refresh button (or set GUARDIAN_GH_TOKEN env var)")
     parser.add_argument("--output", "-o", default="docs/index.html",
                         help="Output HTML file (default: docs/index.html)")
     args = parser.parse_args()
@@ -563,13 +1091,16 @@ def main():
     ci_data = load_json_safe(args.ci)
     renovate_data = load_json_safe(args.renovate)
     sonar_data = load_json_safe(args.sonar)
+    codecov_data = load_json_safe(args.codecov)
     correlation_data = load_json_safe(args.correlation)
+    supply_chain_data = load_json_safe(args.supply_chain)
 
-    if not any([prs_data, ci_data, renovate_data, sonar_data]):
+    if not any([prs_data, ci_data, renovate_data, sonar_data, codecov_data, supply_chain_data]):
         print("ERROR: No data files provided or loadable", file=sys.stderr)
         sys.exit(1)
 
-    html = generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data)
+    gh_token = args.gh_token or os.environ.get("GUARDIAN_GH_TOKEN", "")
+    html = generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data, codecov_data, supply_chain_data, gh_token)
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, "w") as f:
