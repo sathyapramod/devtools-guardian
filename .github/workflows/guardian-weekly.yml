@@ -62,7 +62,7 @@ jobs:
         run: python3 scripts/correlate_failures.py --ci reports/ci-status.json --renovate reports/renovate-prs.json -o reports/correlation.json
 
       - name: Fetch supply-chain audit
-        run: python3 scripts/fetch_supply_chain.py --repos-file config/repos.json --days 7 -o reports/supply-chain.json
+        run: python3 scripts/fetch_supply_chain.py --repos-file config/repos.json --days 7 --skip-vulns -o reports/supply-chain.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

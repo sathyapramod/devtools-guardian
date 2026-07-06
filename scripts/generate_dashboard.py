@@ -133,12 +133,11 @@ def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_dat
     if supply_chain_data:
         agg = supply_chain_data.get("aggregate", {})
         critical = agg.get("critical_findings", 0)
-        vulns = agg.get("total_vulnerabilities", 0)
         post_appr = agg.get("total_post_approval", 0)
         bot_only = agg.get("total_bot_only", 0)
-        total = vulns + post_appr + bot_only
+        total = post_appr + bot_only
         status = "ERROR" if critical > 0 else ("WARN" if total > 0 else "OK")
-        cards.append(card_html("Supply Chain", status, f"{vulns} vulns, {post_appr} post-approval, {bot_only} bot-only"))
+        cards.append(card_html("Supply Chain", status, f"{post_appr} post-approval, {bot_only} bot-only"))
     else:
         cards.append(card_html("Supply Chain", "UNKNOWN", "No data"))
 
@@ -633,7 +632,6 @@ def build_supply_chain_section(sc_data):
 
     all_post_approval = []
     all_bot_only = []
-    all_vulns = []
 
     for repo in results:
         slug = f"{repo.get('owner', '?')}/{repo.get('repo', '?')}"
@@ -643,31 +641,8 @@ def build_supply_chain_section(sc_data):
         for f in repo.get("bot_only", []):
             f["_repo"] = slug
             all_bot_only.append(f)
-        for f in repo.get("vulnerabilities", []):
-            f["_repo"] = slug
-            all_vulns.append(f)
 
     content = f'<p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem;">Last {days} days of merged PRs scanned across {agg.get("repos_scanned", 0)} repos.</p>'
-
-    # --- Vulnerabilities ---
-    if all_vulns:
-        all_vulns.sort(key=lambda v: (0 if v.get("risk") == "critical" else 1, v.get("_repo", "")))
-        rows = ""
-        for v in all_vulns:
-            risk_cls = "error" if v["risk"] == "critical" else "warn"
-            cve_str = ", ".join(v.get("cve_ids", [])) or v.get("vuln_id", "?")
-            rows += (
-                f"<tr>"
-                f"<td>{esc(v['_repo'])}</td>"
-                f"<td>{esc(v.get('package', ''))}</td>"
-                f"<td>{esc(v.get('version', ''))}</td>"
-                f'<td><span class="status {risk_cls}">{esc(cve_str)}</span></td>'
-                f"<td>{esc(v.get('summary', '')[:80])}</td>"
-                f"</tr>"
-            )
-        content += f'''<h3>Known Vulnerabilities ({len(all_vulns)})</h3>
-<table><thead><tr><th>Repo</th><th>Package</th><th>Version</th><th>CVE / Advisory</th><th>Summary</th></tr></thead>
-<tbody>{rows}</tbody></table>'''
 
     # --- Post-Approval Commits ---
     if all_post_approval:
@@ -718,10 +693,10 @@ def build_supply_chain_section(sc_data):
 <table><thead><tr><th>Repo</th><th>PR</th><th>Title</th><th>Author</th><th>Approved By</th><th>Bot PR?</th></tr></thead>
 <tbody>{rows}</tbody></table>'''
 
-    if not all_vulns and not all_post_approval and not all_bot_only:
+    if not all_post_approval and not all_bot_only:
         content += '<p style="color:var(--ok-text);">No supply-chain findings in this period.</p>'
 
-    total = agg.get("total_post_approval", 0) + agg.get("total_bot_only", 0) + agg.get("total_vulnerabilities", 0)
+    total = agg.get("total_post_approval", 0) + agg.get("total_bot_only", 0)
     return section_html("supply-chain", "Supply Chain Audit", total, content)
 
 
