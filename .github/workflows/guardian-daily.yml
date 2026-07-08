@@ -2,7 +2,7 @@ name: Guardian Daily Check
 
 on:
   schedule:
-    - cron: "30 3 * * *"
+    - cron: "30 2 * * *"
     - cron: "30 9 * * *"
   workflow_dispatch:
   push:

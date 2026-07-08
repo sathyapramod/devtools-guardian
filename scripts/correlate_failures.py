@@ -20,6 +20,8 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 
+IST = timezone(timedelta(hours=5, minutes=30))
+
 
 TEMPORAL_WINDOW_HOURS = 2
 MIN_CLUSTER_SIZE = 2
@@ -157,8 +159,8 @@ def find_temporal_clusters(failures):
 
         if len(group_repos) >= MIN_CLUSTER_SIZE:
             used.add(i)
-            window_start = ts_i.strftime("%H:%M UTC")
-            window_end = (ts_i + timedelta(hours=TEMPORAL_WINDOW_HOURS)).strftime("%H:%M UTC")
+            window_start = ts_i.astimezone(IST).strftime("%H:%M IST")
+            window_end = (ts_i + timedelta(hours=TEMPORAL_WINDOW_HOURS)).astimezone(IST).strftime("%H:%M IST")
             clusters.append({
                 "type": "temporal",
                 "description": f"{len(group_repos)} repos failed between {window_start} and {window_end}",

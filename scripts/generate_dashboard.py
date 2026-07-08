@@ -14,7 +14,9 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def load_json_safe(path):
@@ -1126,7 +1128,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data=None, codecov_data=None, supply_chain_data=None, gh_token=""):
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    now_str = datetime.now(IST).strftime("%Y-%m-%d %H:%M IST")
 
     repos_list = []
     if ci_data:

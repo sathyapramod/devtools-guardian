@@ -16,7 +16,9 @@ Usage:
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def load_json(path):
@@ -62,7 +64,7 @@ def health_icon(status):
 
 def generate_pr_report(data):
     """Generate the Open PR dashboard."""
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    now_str = datetime.now(IST).strftime("%Y-%m-%d %H:%M IST")
     lines = []
 
     lines.append("# Guardian: Open PR Dashboard")
@@ -190,7 +192,7 @@ def generate_pr_report(data):
 
 def generate_ci_report(data):
     """Generate the CI/Pipeline Health dashboard."""
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    now_str = datetime.now(IST).strftime("%Y-%m-%d %H:%M IST")
     lines = []
 
     lines.append("# Guardian: CI/Pipeline Health Dashboard")
@@ -314,7 +316,7 @@ def generate_ci_report(data):
 
 def generate_renovate_report(data):
     """Generate the Dependency Update dashboard."""
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    now_str = datetime.now(IST).strftime("%Y-%m-%d %H:%M IST")
     lines = []
 
     lines.append("# Guardian: Dependency Update Dashboard")
@@ -445,7 +447,7 @@ def generate_renovate_report(data):
 
 def generate_sonar_report(data):
     """Generate the SonarCloud Quality Gate dashboard."""
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    now_str = datetime.now(IST).strftime("%Y-%m-%d %H:%M IST")
     lines = []
 
     lines.append("# Guardian: SonarCloud Quality Dashboard")
@@ -557,7 +559,7 @@ def generate_sonar_report(data):
 
 def generate_codecov_report(data):
     """Generate the Code Coverage dashboard from Codecov data."""
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    now_str = datetime.now(IST).strftime("%Y-%m-%d %H:%M IST")
     lines = []
 
     lines.append("# Guardian: Code Coverage Dashboard (Codecov)")
@@ -640,7 +642,7 @@ def generate_codecov_report(data):
 
 def generate_guardian_report(prs_data, ci_data, renovate_data, sonar_data, codecov_data=None):
     """Generate a consolidated Guardian shift dashboard."""
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    now_str = datetime.now(IST).strftime("%Y-%m-%d %H:%M IST")
     lines = []
 
     lines.append("# Guardian: Daily Shift Dashboard")
@@ -817,7 +819,7 @@ def generate_guardian_report(prs_data, ci_data, renovate_data, sonar_data, codec
 
 def generate_handoff_report(prs_data, ci_data, renovate_data, sonar_data, codecov_data=None):
     """Generate a Jira handoff template for the next Guardian."""
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    now_str = datetime.now(IST).strftime("%Y-%m-%d %H:%M IST")
     lines = []
 
     lines.append("# Guardian Handoff Report")
