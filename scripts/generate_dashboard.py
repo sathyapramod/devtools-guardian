@@ -627,6 +627,42 @@ li { margin-bottom: 4px; font-size: 0.85rem; }
 }
 .footer span { color: var(--accent); font-weight: 600; }
 
+[data-theme="dark"] {
+  --bg: #1A222C;
+  --surface: #24303F;
+  --surface-hover: #2E3A4A;
+  --border: #2E3A47;
+  --border-subtle: #333A48;
+  --text: #DEE4EE;
+  --text-muted: #8A99AF;
+  --text-dim: #6B7B93;
+  --accent-bg: rgba(60, 80, 224, 0.15);
+  --accent-light: #80CAEE;
+  --ok-bg: rgba(16, 185, 129, 0.12);
+  --ok-text: #34D399;
+  --warn-bg: rgba(245, 158, 11, 0.12);
+  --warn-text: #FBBF24;
+  --error-bg: rgba(239, 68, 68, 0.12);
+  --error-text: #F87171;
+  --neutral: #333A48;
+  --neutral-text: #8A99AF;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.2), 0 1px 2px rgba(0,0,0,0.15);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.25), 0 2px 4px rgba(0,0,0,0.15);
+}
+[data-theme="dark"] thead th { background: #2E3A47; }
+[data-theme="dark"] tbody tr:hover { background: rgba(255,255,255,0.02); }
+[data-theme="dark"] .status.neutral { background: rgba(51,58,72,0.5); }
+[data-theme="dark"] .nav-bar { background: rgba(26,34,44,0.92); }
+
+.theme-toggle {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px;
+  border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-muted); font-size: 0.78rem; font-weight: 500;
+  cursor: pointer; transition: all var(--transition);
+}
+.theme-toggle:hover { background: var(--surface-hover); color: var(--text); }
+.theme-toggle svg { width: 14px; height: 14px; }
+
 @media (max-width: 768px) {
   body { padding: 16px; }
   .cards { grid-template-columns: repeat(2, 1fr); gap: 12px; }
@@ -1144,6 +1180,11 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
     <span><span class="live-dot" id="live-dot"></span> <span id="live-time">Live: --</span></span>
     <span id="live-ci-count"></span>
     <span id="rate-limit">--/12 refreshes today</span>
+    <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()">
+      <svg id="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m8.66-13.66l-.71.71M4.05 19.95l-.71.71M21 12h-1M4 12H3m16.66 7.66l-.71-.71M4.05 4.05l-.71-.71M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+      <svg id="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="display:none"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+      <span id="theme-label">Dark</span>
+    </button>
   </div>
 </div>"""
 
@@ -1158,6 +1199,9 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>{CSS}
 {TOOLBAR_CSS}</style>
+<script>
+(function(){{var t=localStorage.getItem('guardian-theme');if(t)document.documentElement.setAttribute('data-theme',t);}})();
+</script>
 </head>
 <body>
 
@@ -1182,6 +1226,30 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
 </footer>
 
 <script>{js}</script>
+<script>
+function toggleTheme() {{
+  var html = document.documentElement;
+  var isDark = html.getAttribute('data-theme') === 'dark';
+  if (isDark) {{
+    html.removeAttribute('data-theme');
+    localStorage.setItem('guardian-theme', '');
+  }} else {{
+    html.setAttribute('data-theme', 'dark');
+    localStorage.setItem('guardian-theme', 'dark');
+  }}
+  updateThemeUI();
+}}
+function updateThemeUI() {{
+  var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  var sun = document.getElementById('theme-icon-sun');
+  var moon = document.getElementById('theme-icon-moon');
+  var label = document.getElementById('theme-label');
+  if (sun) sun.style.display = isDark ? 'none' : 'block';
+  if (moon) moon.style.display = isDark ? 'block' : 'none';
+  if (label) label.textContent = isDark ? 'Light' : 'Dark';
+}}
+document.addEventListener('DOMContentLoaded', updateThemeUI);
+</script>
 </body>
 </html>
 """
