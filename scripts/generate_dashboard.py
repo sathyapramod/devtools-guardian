@@ -70,11 +70,56 @@ def card_html(title, status, detail):
 
 
 def section_html(section_id, title, count, content, collapsed=False):
-    state = "" if not collapsed else ""
     return f'''<details class="section" id="{section_id}" {"" if collapsed else "open"}>
   <summary><h2>{esc(title)} <span class="badge">{count}</span></h2></summary>
   {content}
 </details>'''
+
+
+def build_action_items(prs_data, ci_data, renovate_data, sonar_data):
+    items = []
+
+    if ci_data:
+        for repo in ci_data.get("results", [ci_data]):
+            slug = f"{repo.get('owner', '?')}/{repo.get('repo', '?')}"
+            for wf in repo.get("workflows", []):
+                if wf.get("conclusion") == "failure" and not wf.get("is_flaky"):
+                    url = wf.get("url", "")
+                    link = f'<a href="{esc(url)}" target="_blank">{esc(slug)}</a>' if url else esc(slug)
+                    items.append(("error", "CI FAILURE", f"{link} — {esc(wf['name'])}"))
+
+    if prs_data:
+        for repo in prs_data.get("results", [prs_data]):
+            slug = f"{repo.get('owner', '?')}/{repo.get('repo', '?')}"
+            for pr in repo.get("prs", []):
+                if pr.get("category") == "ready_to_merge":
+                    url = pr.get("url", "")
+                    link = f'<a href="{esc(url)}" target="_blank">{esc(slug)}#{pr["number"]}</a>' if url else f'{esc(slug)}#{pr["number"]}'
+                    items.append(("ok", "MERGE", f"{link} — {esc(pr.get('title', '')[:50])}"))
+
+    if renovate_data:
+        for repo in renovate_data.get("results", [renovate_data]):
+            slug = f"{repo.get('owner', '?')}/{repo.get('repo', '?')}"
+            for pr in repo.get("prs", []):
+                if pr.get("is_overdue") and pr.get("update_type") == "security":
+                    url = pr.get("url", "")
+                    link = f'<a href="{esc(url)}" target="_blank">{esc(slug)}#{pr["number"]}</a>' if url else f'{esc(slug)}#{pr["number"]}'
+                    items.append(("error", "SECURITY DEP", f"{link} — {esc(pr.get('title', '')[:50])}"))
+
+    if sonar_data:
+        for proj in sonar_data.get("results", [sonar_data]):
+            if proj.get("gate_status") == "ERROR":
+                slug = f"{proj.get('owner', '?')}/{proj.get('repo', '?')}"
+                items.append(("warn", "SONAR GATE", f"{esc(slug)} — quality gate failing"))
+
+    if not items:
+        return '<div class="action-items ok"><h3>Priority Actions</h3><p>All systems healthy. No urgent action items.</p></div>'
+
+    rows = ""
+    for cls, tag, detail in items:
+        rows += f'<li><span class="status {cls}">{tag}</span> {detail}</li>'
+
+    return f'<div class="action-items"><h3>Priority Actions <span class="badge">{len(items)}</span></h3><ul>{rows}</ul></div>'
 
 
 def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_data=None, supply_chain_data=None):
@@ -464,11 +509,33 @@ tr:hover { background: rgba(255,255,255,0.03); }
 ul { list-style: disc; padding-left: 1.5rem; margin-bottom: 1rem; }
 li { margin-bottom: 0.3rem; font-size: 0.9rem; }
 
+.action-items { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+               padding: 1rem; margin-bottom: 1.5rem; }
+.action-items h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+.action-items.ok { border-left: 4px solid var(--ok); }
+.action-items.ok p { color: var(--ok-text); margin: 0; }
+.action-items ul { list-style: none; padding: 0; margin: 0; }
+.action-items li { padding: 0.4rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+.action-items li:last-child { border-bottom: none; }
+.action-items .status { margin-right: 0.5rem; }
+
+.nav-bar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+           position: sticky; top: 0; z-index: 100;
+           padding: 0.5rem 1rem; margin-bottom: 1rem;
+           background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.nav-bar a { font-size: 0.8rem; padding: 0.25rem 0.6rem; border-radius: 4px;
+             color: var(--text-muted); text-decoration: none; transition: all 0.15s; }
+.nav-bar a:hover { background: var(--border); color: var(--text); text-decoration: none; }
+
+.section { scroll-margin-top: 3.5rem; }
+
 @media (max-width: 600px) {
   body { padding: 0.75rem; }
   .cards { grid-template-columns: repeat(2, 1fr); gap: 0.5rem; }
   table { font-size: 0.75rem; }
   td, th { padding: 0.35rem; }
+  .nav-bar { gap: 0.25rem; }
+  .nav-bar a { font-size: 0.7rem; padding: 0.2rem 0.4rem; }
 }
 """
 
@@ -693,10 +760,37 @@ def build_supply_chain_section(sc_data):
 <table><thead><tr><th>Repo</th><th>PR</th><th>Title</th><th>Author</th><th>Approved By</th><th>Bot PR?</th></tr></thead>
 <tbody>{rows}</tbody></table>'''
 
-    if not all_post_approval and not all_bot_only:
+    # --- Known Vulnerabilities ---
+    all_vulns = []
+    for repo in results:
+        slug = f"{repo.get('owner', '?')}/{repo.get('repo', '?')}"
+        for v in repo.get("vulnerabilities", []):
+            v["_repo"] = slug
+            all_vulns.append(v)
+
+    if all_vulns:
+        all_vulns.sort(key=lambda v: (0 if v.get("severity") == "critical" else (1 if v.get("severity") == "high" else (2 if v.get("severity") == "medium" else 3))))
+        rows = ""
+        for v in all_vulns:
+            sev = v.get("severity", "unknown")
+            sev_cls = "error" if sev in ("critical", "high") else ("warn" if sev == "medium" else "neutral")
+            rows += (
+                f"<tr>"
+                f"<td>{esc(v['_repo'])}</td>"
+                f"<td>{esc(v.get('id', ''))}</td>"
+                f'<td><span class="status {sev_cls}">{esc(sev)}</span></td>'
+                f"<td>{esc(v.get('package', ''))}</td>"
+                f"<td>{esc(v.get('ecosystem', ''))}</td>"
+                f"</tr>"
+            )
+        content += f'''<h3>Known Vulnerabilities ({len(all_vulns)})</h3>
+<table><thead><tr><th>Repo</th><th>ID</th><th>Severity</th><th>Package</th><th>Ecosystem</th></tr></thead>
+<tbody>{rows}</tbody></table>'''
+
+    if not all_post_approval and not all_bot_only and not all_vulns:
         content += '<p style="color:var(--ok-text);">No supply-chain findings in this period.</p>'
 
-    total = agg.get("total_post_approval", 0) + agg.get("total_bot_only", 0)
+    total = agg.get("total_post_approval", 0) + agg.get("total_bot_only", 0) + len(all_vulns)
     return section_html("supply-chain", "Supply Chain Audit", total, content)
 
 
@@ -1020,6 +1114,7 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
     )
 
     health_cards = build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_data, supply_chain_data)
+    action_items = build_action_items(prs_data, ci_data, renovate_data, sonar_data)
     repo_status_section = build_repo_status_section(ci_data, prs_data, codecov_data)
     ci_section = build_ci_section(ci_data)
     correlation_section = build_correlation_section(correlation_data)
@@ -1029,7 +1124,24 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
     sonar_section = build_sonar_section(sonar_data)
     supply_chain_section = build_supply_chain_section(supply_chain_data)
 
-    sections = "\n".join(s for s in [repo_status_section, ci_section, correlation_section, pr_section, supply_chain_section, codecov_section, renovate_section, sonar_section] if s)
+    section_list = [
+        ("repo-status", "Repos", repo_status_section),
+        ("ci", "CI", ci_section),
+        ("correlation", "Correlation", correlation_section),
+        ("prs", "PRs", pr_section),
+        ("supply-chain", "Supply Chain", supply_chain_section),
+        ("codecov", "Coverage", codecov_section),
+        ("deps", "Dependencies", renovate_section),
+        ("sonar", "SonarCloud", sonar_section),
+    ]
+
+    nav_links = "".join(
+        f'<a href="#{sid}">{label}</a>'
+        for sid, label, html in section_list if html
+    )
+    nav_html = f'<nav class="nav-bar">{nav_links}</nav>' if nav_links else ""
+
+    sections = "\n".join(html for _, _, html in section_list if html)
 
     toolbar_html = """<div class="toolbar">
   <div class="toolbar-left">
@@ -1059,7 +1171,11 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
 
 {toolbar_html}
 
+{nav_html}
+
 {health_cards}
+
+{action_items}
 
 {sections}
 
