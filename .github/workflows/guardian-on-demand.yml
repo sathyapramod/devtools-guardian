@@ -1,0 +1,56 @@
+name: Guardian On-Demand
+
+on:
+  workflow_dispatch:
+    inputs:
+      security_audit:
+        description: "Run security audit (SonarCloud + Codecov)"
+        type: boolean
+        default: true
+      supply_chain:
+        description: "Run supply-chain audit"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: guardian-on-demand
+  cancel-in-progress: true
+
+jobs:
+  run-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch Codecov coverage
+        if: ${{ inputs.security_audit }}
+        run: python3 scripts/fetch_codecov.py --codecov-config config/codecov.json > reports/codecov.json
+
+      - name: Fetch SonarCloud quality gates
+        if: ${{ inputs.security_audit }}
+        run: python3 scripts/fetch_sonar_gates.py --sonar-config config/sonar.json > reports/sonar-gates.json
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Fetch supply-chain audit
+        if: ${{ inputs.supply_chain }}
+        run: python3 scripts/fetch_supply_chain.py --repos-file config/repos.json --days 7 --skip-vulns -o reports/supply-chain.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit reports
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add reports/
+          git diff --cached --quiet || git commit -m "chore: update on-demand guardian reports [skip ci]"
+          git push
