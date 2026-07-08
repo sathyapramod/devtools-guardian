@@ -2,7 +2,6 @@
     "repos": [
       {"owner": "ansible", "repo": "actions", "default_branch": "main", "ci_workflow": "test.yml"},
       {"owner": "ansible", "repo": "ansible-compat", "default_branch": "main", "ci_workflow": "tox.yml"},
-      {"owner": "ansible", "repo": "ansible-content-actions", "default_branch": "main", "ci_workflow": "ci.yaml"},
       {"owner": "ansible", "repo": "ansible-creator", "default_branch": "main", "ci_workflow": "tox.yml"},
       {"owner": "ansible", "repo": "ansible-dev-environment", "default_branch": "main", "ci_workflow": "tox.yml"},
       {"owner": "ansible", "repo": "ansible-dev-tools", "default_branch": "main", "ci_workflow": "tox.yml"},

@@ -9,7 +9,6 @@
     {"key": "ansible_actions", "owner": "ansible", "repo": "actions"},
     {"key": "ansible_ansible-compat", "owner": "ansible", "repo": "ansible-compat"},
     {"key": "ansible_ansible-dev-tools", "owner": "ansible", "repo": "ansible-dev-tools"},
-    {"key": "ansible_ansible-content-actions", "owner": "ansible", "repo": "ansible-content-actions"},
     {"key": "ansible_ansible-creator", "owner": "ansible", "repo": "ansible-creator"},
     {"key": "ansible_ansible-sign", "owner": "ansible", "repo": "ansible-sign"},
     {"key": "ansible_pytest-ansible", "owner": "ansible", "repo": "pytest-ansible"},
