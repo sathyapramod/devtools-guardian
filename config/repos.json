@@ -2,6 +2,7 @@
     "repos": [
       {"owner": "ansible", "repo": "actions", "default_branch": "main", "ci_workflow": "test.yml"},
       {"owner": "ansible", "repo": "ansible-compat", "default_branch": "main", "ci_workflow": "tox.yml"},
+      {"owner": "ansible", "repo": "ansible-content-actions", "default_branch": "main", "ci_workflow": "ci.yaml"},
       {"owner": "ansible", "repo": "ansible-creator", "default_branch": "main", "ci_workflow": "tox.yml"},
       {"owner": "ansible", "repo": "ansible-dev-environment", "default_branch": "main", "ci_workflow": "tox.yml"},
       {"owner": "ansible", "repo": "ansible-dev-tools", "default_branch": "main", "ci_workflow": "tox.yml"},
@@ -13,6 +14,8 @@
       {"owner": "ansible", "repo": "pytest-ansible", "default_branch": "main", "ci_workflow": "tox.yml"},
       {"owner": "ansible", "repo": "team-devtools", "default_branch": "main", "ci_workflow": "test.yml"},
       {"owner": "ansible", "repo": "tox-ansible", "default_branch": "main", "ci_workflow": "tox.yml"},
-      {"owner": "ansible", "repo": "vscode-ansible", "default_branch": "main", "ci_workflow": "ci.yaml"}
+      {"owner": "ansible", "repo": "vscode-ansible", "default_branch": "main", "ci_workflow": "ci.yaml"},
+      {"owner": "ansible-automation-platform", "repo": "ansible-devtools-container", "default_branch": "ansible-automation-platform-devel", "ci_workflow": "merge-gate.yaml"},
+      {"owner": "ansible-automation-platform", "repo": "ansible-devspaces-container", "default_branch": "ansible-automation-platform-devel", "ci_workflow": "merge-gate.yaml"}
     ]
   }
