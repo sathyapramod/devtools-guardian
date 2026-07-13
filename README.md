@@ -147,7 +147,7 @@ devtools-guardian/
 │   ├── guardian-daily.yml
 │   └── guardian-weekly.yml
 ├── config/
-│   ├── repos.json           # 18 tracked repositories with CI workflow config
+│   ├── repos.json           # 17 tracked repositories with CI workflow config
 │   ├── sonar.json           # SonarCloud project mappings
 │   └── codecov.json         # Codecov-tracked repositories
 ├── scripts/

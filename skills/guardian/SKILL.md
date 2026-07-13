@@ -21,7 +21,7 @@ check SonarCloud quality gates, and correlate CI failures across repositories.
 
 All scripts live in the devtools-guardian repo. The key paths are:
 
-- `config/repos.json` — 16 tracked repos across `ansible` and `ansible-automation-platform` orgs
+- `config/repos.json` — 17 tracked repos across `ansible` and `ansible-automation-platform` orgs
 - `config/sonar.json` — SonarCloud project key mappings
 - `scripts/fetch_open_prs.py` — PR tracking with review status categorization
 - `scripts/fetch_ci_status.py` — GitHub Actions workflow status + flaky detection
