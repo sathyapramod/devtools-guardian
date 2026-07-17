@@ -1139,11 +1139,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 def build_security_audit_section(audit_data):
-    """Build the full Security Audit section dynamically from audit findings.
-
-    Renders whatever categories exist in the data, so new detection passes
-    added to analyze.py appear automatically without dashboard code changes.
-    """
+    """Build a lightweight Security Audit section that links to the full report."""
     if not audit_data:
         return ""
 
@@ -1151,15 +1147,7 @@ def build_security_audit_section(audit_data):
     repos_audited = audit_data.get("repos_audited", [])
     total = audit_data.get("total_findings", 0)
     risk_totals = audit_data.get("risk_totals", {})
-    category_breakdown = audit_data.get("category_breakdown", [])
-    repo_breakdown = audit_data.get("repo_breakdown", [])
-    findings = audit_data.get("findings", [])
-    recommendations = audit_data.get("recommendations", [])
-    labels = audit_data.get("category_labels", {})
 
-    content = ""
-
-    # --- Executive summary ---
     risk_cards = ""
     for level in ("critical", "high", "medium", "low", "info"):
         count = risk_totals.get(level, 0)
@@ -1168,131 +1156,17 @@ def build_security_audit_section(audit_data):
         cls = "error" if level in ("critical", "high") else ("warn" if level == "medium" else "neutral")
         risk_cards += f'<span class="status {cls}" style="margin-right:0.5rem;padding:0.25rem 0.6rem;font-size:0.85rem;">{count} {level}</span>'
 
-    content += (
-        f'<p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.5rem;">'
-        f'Audit window: {window} &mdash; {len(repos_audited)} repos scanned'
-        f' &mdash; <a href="audit.html" target="_blank" style="font-weight:600;">View Full Report &rarr;</a></p>'
+    content = (
+        f'<p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.75rem;">'
+        f'Audit window: {window} &mdash; {len(repos_audited)} repos scanned</p>'
         f'<div style="margin-bottom:1.2rem;">{risk_cards}</div>'
+        f'<a href="audit.html" target="_blank" '
+        f'style="display:inline-block;padding:0.6rem 1.2rem;background:var(--accent);color:#fff;'
+        f'border-radius:6px;text-decoration:none;font-weight:600;font-size:0.95rem;">'
+        f'View Full Report &rarr;</a>'
     )
 
     # --- Repo traffic-light table ---
-    if repo_breakdown:
-        rows = ""
-        for repo in repo_breakdown:
-            name = repo.get("repo", "")
-            crit = repo.get("critical", 0)
-            high = repo.get("high", 0)
-            med = repo.get("medium", 0)
-            low = repo.get("low", 0)
-            repo_total = repo.get("total", 0)
-            if crit > 0 or high > 0:
-                cls = "error"
-            elif med > 0:
-                cls = "warn"
-            elif repo_total == 0:
-                cls = "ok"
-            else:
-                cls = "neutral"
-            rows += (
-                f'<tr class="{cls}">'
-                f"<td>{esc(name)}</td>"
-                f"<td>{crit}</td>"
-                f"<td>{high}</td>"
-                f"<td>{med}</td>"
-                f"<td>{low}</td>"
-                f"<td>{repo_total}</td>"
-                f'<td><span class="status {cls}">{"CLEAN" if repo_total == 0 else cls.upper()}</span></td>'
-                f"</tr>"
-            )
-        content += (
-            '<h3>Repo Risk Overview</h3>'
-            '<table><thead><tr>'
-            '<th>Repository</th><th>Critical</th><th>High</th><th>Medium</th><th>Low</th><th>Total</th><th>Status</th>'
-            '</tr></thead>'
-            f'<tbody>{rows}</tbody></table>'
-        )
-
-    # --- Findings by category (dynamic) ---
-    findings_by_cat = {}
-    for f in findings:
-        cat = f.get("category", "unknown")
-        findings_by_cat.setdefault(cat, []).append(f)
-
-    for cat_info in category_breakdown:
-        cat = cat_info.get("category", "")
-        cat_total = cat_info.get("total", 0)
-        if cat_total == 0:
-            continue
-
-        label = labels.get(cat, cat.replace("_", " ").title())
-        cat_findings = findings_by_cat.get(cat, [])
-
-        risk_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-        cat_findings.sort(key=lambda f: risk_order.get(f.get("risk_level", "info"), 5))
-
-        rows = ""
-        for f in cat_findings[:50]:
-            risk = f.get("risk_level", "info")
-            risk_cls = "error" if risk in ("critical", "high") else ("warn" if risk == "medium" else "neutral")
-            repo = f.get("repo", "")
-            summary_text = f.get("summary", "")
-            date = f.get("date") or ""
-            if date:
-                date = date[:10]
-
-            sha = f.get("commit_sha", "")
-            pr = f.get("pr_number")
-            link = ""
-            if pr:
-                link = f'<a href="https://github.com/ansible/{repo}/pull/{pr}" target="_blank">PR #{pr}</a>'
-            elif sha:
-                short = sha[:7]
-                link = f'<a href="https://github.com/ansible/{repo}/commit/{sha}" target="_blank">{short}</a>'
-
-            rows += (
-                f"<tr>"
-                f"<td>{esc(repo)}</td>"
-                f"<td>{esc(summary_text[:80])}</td>"
-                f'<td><span class="status {risk_cls}">{esc(risk)}</span></td>'
-                f"<td>{esc(date)}</td>"
-                f"<td>{link}</td>"
-                f"</tr>"
-            )
-
-        highest_risk = "medium"
-        for rc in cat_info.get("risk_counts", {}):
-            if rc in ("critical", "high"):
-                highest_risk = rc
-                break
-        badge_cls = "error" if highest_risk in ("critical", "high") else "warn"
-
-        content += (
-            f'<details style="margin-top:1rem;">'
-            f'<summary><h3 style="display:inline;">{esc(label)} '
-            f'<span class="badge" style="background:var(--{badge_cls}-bg);color:var(--{badge_cls}-text);">{cat_total}</span>'
-            f'</h3></summary>'
-            f'<table><thead><tr>'
-            f'<th>Repo</th><th>Summary</th><th>Risk</th><th>Date</th><th>Link</th>'
-            f'</tr></thead>'
-            f'<tbody>{rows}</tbody></table>'
-            f'</details>'
-        )
-
-    # --- Recommendations ---
-    if recommendations:
-        rec_items = ""
-        for i, rec in enumerate(recommendations[:10], 1):
-            title = esc(rec.get("title", ""))
-            detail = rec.get("detail", "")
-            rec_items += (
-                f'<div style="margin-bottom:1rem;padding:0.75rem 1rem;'
-                f'background:var(--card-bg);border-radius:8px;border:1px solid var(--border);">'
-                f'<strong>{i}. {title}</strong>'
-                f'<p style="margin:0.4rem 0 0;font-size:0.9rem;color:var(--text-muted);">{detail}</p>'
-                f'</div>'
-            )
-        content += f'<h3 style="margin-top:1.5rem;">Security Recommendations</h3>{rec_items}'
-
     return section_html("security-audit", "Security Audit", total, content)
 
 
