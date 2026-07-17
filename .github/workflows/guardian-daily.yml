@@ -67,41 +67,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Clone audit scripts
-        run: |
-          git clone --depth 1 --filter=blob:none --sparse \
-            https://github.com/ansible/team-devtools.git /tmp/team-devtools
-          cd /tmp/team-devtools
-          git sparse-checkout set .agents/skills/supply-chain-audit/scripts
-
-      - name: Run full security audit (collect + analyze)
-        run: |
-          START_DATE=$(date -d '7 days ago' +%Y-%m-%d)
-          END_DATE=$(date +%Y-%m-%d)
-          CACHE_DIR=".supply-chain-audit/cache"
-
-          python3 /tmp/team-devtools/.agents/skills/supply-chain-audit/scripts/collect.py \
-            --start "$START_DATE" --end "$END_DATE" --cache-dir "$CACHE_DIR"
-
-          python3 /tmp/team-devtools/.agents/skills/supply-chain-audit/scripts/analyze.py \
-            --cache-dir "$CACHE_DIR"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Convert audit to dashboard format
-        run: |
-          CACHE_HASH=$(ls .supply-chain-audit/cache/ | head -1)
-          python3 scripts/convert_audit.py \
-            --cache-dir ".supply-chain-audit/cache/$CACHE_HASH" \
-            -o reports/security-audit.json
-
-      - name: Generate full audit report
-        run: |
-          CACHE_HASH=$(ls .supply-chain-audit/cache/ | head -1)
-          python3 /tmp/team-devtools/.agents/skills/supply-chain-audit/scripts/report.py \
-            --cache-dir ".supply-chain-audit/cache/$CACHE_HASH" \
-            --output docs/audit.html
-
       - name: Generate HTML dashboard
         run: |
           python3 scripts/generate_dashboard.py \
