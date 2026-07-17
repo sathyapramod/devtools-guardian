@@ -124,7 +124,7 @@ def build_action_items(prs_data, ci_data, renovate_data, sonar_data):
     return f'<div class="action-items"><h3>Priority Actions <span class="badge">{len(items)}</span></h3><ul>{rows}</ul></div>'
 
 
-def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_data=None, supply_chain_data=None):
+def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_data=None, supply_chain_data=None, security_audit_data=None):
     cards = []
 
     if ci_data:
@@ -188,7 +188,36 @@ def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_dat
     else:
         cards.append(card_html("Supply Chain", "UNKNOWN", "No data"))
 
-    return '<div class="cards">' + "\n".join(cards) + "</div>"
+    cards_html = '<div class="cards">' + "\n".join(cards) + "</div>"
+
+    if security_audit_data:
+        risk = security_audit_data.get("risk_totals", {})
+        crit = risk.get("critical", 0)
+        high = risk.get("high", 0)
+        med = risk.get("medium", 0)
+        total_findings = security_audit_data.get("total_findings", 0)
+        window = security_audit_data.get("audit_window", "")
+
+        badges = ""
+        for level, count in [("critical", crit), ("high", high), ("medium", med)]:
+            if count == 0:
+                continue
+            bcls = "error" if level in ("critical", "high") else "warn"
+            badges += f'<span class="status {bcls}" style="margin-left:0.5rem;padding:0.15rem 0.5rem;font-size:0.8rem;">{count} {level}</span>'
+
+        cards_html += (
+            f'<a href="audit.html" target="_blank" style="text-decoration:none;display:block;'
+            f'margin:-12px 0 24px;padding:10px 16px;border-radius:8px;'
+            f'border:1px solid var(--border);'
+            f'background:var(--card-bg);color:var(--text);">'
+            f'<span style="font-weight:600;">Security Audit</span>'
+            f'{badges}'
+            f'<span style="color:var(--text-muted);margin-left:0.75rem;font-size:0.85rem;">{esc(window)}</span>'
+            f'<span style="float:right;font-weight:600;color:var(--accent);">View Full Report &rarr;</span>'
+            f'</a>'
+        )
+
+    return cards_html
 
 
 def build_ci_section(ci_data):
@@ -1127,7 +1156,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
-def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data=None, codecov_data=None, supply_chain_data=None, gh_token=""):
+def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data=None, codecov_data=None, supply_chain_data=None, security_audit_data=None, gh_token=""):
     now_str = datetime.now(IST).strftime("%Y-%m-%d %H:%M IST")
 
     repos_list = []
@@ -1143,7 +1172,7 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
         "%REPOS_JSON%", json.dumps(repos_list)
     )
 
-    health_cards = build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_data, supply_chain_data)
+    health_cards = build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_data, supply_chain_data, security_audit_data)
     action_items = build_action_items(prs_data, ci_data, renovate_data, sonar_data)
     repo_status_section = build_repo_status_section(ci_data, prs_data, codecov_data)
     ci_section = build_ci_section(ci_data)
@@ -1266,6 +1295,7 @@ def main():
     parser.add_argument("--codecov", help="Codecov coverage JSON file")
     parser.add_argument("--correlation", help="Failure correlation JSON file")
     parser.add_argument("--supply-chain", dest="supply_chain", help="Supply chain audit JSON file")
+    parser.add_argument("--security-audit", dest="security_audit", help="Full security audit JSON file (from convert_audit.py)")
     parser.add_argument("--gh-token", help="GitHub PAT for refresh button (or set GUARDIAN_GH_TOKEN env var)")
     parser.add_argument("--output", "-o", default="docs/index.html",
                         help="Output HTML file (default: docs/index.html)")
@@ -1278,13 +1308,14 @@ def main():
     codecov_data = load_json_safe(args.codecov)
     correlation_data = load_json_safe(args.correlation)
     supply_chain_data = load_json_safe(args.supply_chain)
+    security_audit_data = load_json_safe(args.security_audit)
 
-    if not any([prs_data, ci_data, renovate_data, sonar_data, codecov_data, supply_chain_data]):
+    if not any([prs_data, ci_data, renovate_data, sonar_data, codecov_data, supply_chain_data, security_audit_data]):
         print("ERROR: No data files provided or loadable", file=sys.stderr)
         sys.exit(1)
 
     gh_token = args.gh_token or os.environ.get("GUARDIAN_GH_TOKEN", "")
-    html = generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data, codecov_data, supply_chain_data, gh_token)
+    html = generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data, codecov_data, supply_chain_data, security_audit_data, gh_token)
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, "w") as f:

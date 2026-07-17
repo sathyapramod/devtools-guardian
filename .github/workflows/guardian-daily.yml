@@ -77,6 +77,7 @@ jobs:
             --sonar reports/sonar-gates.json \
             --correlation reports/correlation.json \
             --supply-chain reports/supply-chain.json \
+            --security-audit reports/security-audit.json \
             --output docs/index.html
         env:
           GUARDIAN_GH_TOKEN: ${{ secrets.GUARDIAN_GH_TOKEN }}
