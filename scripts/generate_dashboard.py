@@ -1170,7 +1170,8 @@ def build_security_audit_section(audit_data):
 
     content += (
         f'<p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.5rem;">'
-        f'Audit window: {window} &mdash; {len(repos_audited)} repos scanned</p>'
+        f'Audit window: {window} &mdash; {len(repos_audited)} repos scanned'
+        f' &mdash; <a href="audit.html" target="_blank" style="font-weight:600;">View Full Report &rarr;</a></p>'
         f'<div style="margin-bottom:1.2rem;">{risk_cards}</div>'
     )
 

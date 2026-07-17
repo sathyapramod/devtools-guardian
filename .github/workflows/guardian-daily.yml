@@ -95,6 +95,13 @@ jobs:
             --cache-dir ".supply-chain-audit/cache/$CACHE_HASH" \
             -o reports/security-audit.json
 
+      - name: Generate full audit report
+        run: |
+          CACHE_HASH=$(ls .supply-chain-audit/cache/ | head -1)
+          python3 /tmp/team-devtools/.agents/skills/supply-chain-audit/scripts/report.py \
+            --cache-dir ".supply-chain-audit/cache/$CACHE_HASH" \
+            --output docs/audit.html
+
       - name: Generate HTML dashboard
         run: |
           python3 scripts/generate_dashboard.py \
