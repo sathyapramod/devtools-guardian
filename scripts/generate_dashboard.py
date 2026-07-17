@@ -188,18 +188,36 @@ def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_dat
     else:
         cards.append(card_html("Supply Chain", "UNKNOWN", "No data"))
 
+    cards_html = '<div class="cards">' + "\n".join(cards) + "</div>"
+
     if security_audit_data:
         risk = security_audit_data.get("risk_totals", {})
         crit = risk.get("critical", 0)
         high = risk.get("high", 0)
+        med = risk.get("medium", 0)
         total_findings = security_audit_data.get("total_findings", 0)
         window = security_audit_data.get("audit_window", "")
-        status = "ERROR" if crit > 0 or high > 0 else ("WARN" if total_findings > 0 else "OK")
-        cards.append(card_html("Security Audit", status, f"{total_findings} findings ({crit}C/{high}H) {window}"))
-    else:
-        cards.append(card_html("Security Audit", "UNKNOWN", "No data"))
 
-    return '<div class="cards">' + "\n".join(cards) + "</div>"
+        badges = ""
+        for level, count in [("critical", crit), ("high", high), ("medium", med)]:
+            if count == 0:
+                continue
+            bcls = "error" if level in ("critical", "high") else "warn"
+            badges += f'<span class="status {bcls}" style="margin-left:0.5rem;padding:0.15rem 0.5rem;font-size:0.8rem;">{count} {level}</span>'
+
+        cards_html += (
+            f'<a href="audit.html" target="_blank" style="text-decoration:none;display:block;'
+            f'margin:-12px 0 24px;padding:10px 16px;border-radius:8px;'
+            f'border:1px solid var(--border);'
+            f'background:var(--card-bg);color:var(--text);">'
+            f'<span style="font-weight:600;">Security Audit</span>'
+            f'{badges}'
+            f'<span style="color:var(--text-muted);margin-left:0.75rem;font-size:0.85rem;">{esc(window)}</span>'
+            f'<span style="float:right;font-weight:600;color:var(--accent);">View Full Report &rarr;</span>'
+            f'</a>'
+        )
+
+    return cards_html
 
 
 def build_ci_section(ci_data):
@@ -1138,38 +1156,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
-def build_security_audit_section(audit_data):
-    """Build a lightweight Security Audit section that links to the full report."""
-    if not audit_data:
-        return ""
-
-    window = esc(audit_data.get("audit_window", ""))
-    repos_audited = audit_data.get("repos_audited", [])
-    total = audit_data.get("total_findings", 0)
-    risk_totals = audit_data.get("risk_totals", {})
-
-    risk_cards = ""
-    for level in ("critical", "high", "medium", "low", "info"):
-        count = risk_totals.get(level, 0)
-        if count == 0:
-            continue
-        cls = "error" if level in ("critical", "high") else ("warn" if level == "medium" else "neutral")
-        risk_cards += f'<span class="status {cls}" style="margin-right:0.5rem;padding:0.25rem 0.6rem;font-size:0.85rem;">{count} {level}</span>'
-
-    content = (
-        f'<p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.75rem;">'
-        f'Audit window: {window} &mdash; {len(repos_audited)} repos scanned</p>'
-        f'<div style="margin-bottom:1.2rem;">{risk_cards}</div>'
-        f'<a href="audit.html" target="_blank" '
-        f'style="display:inline-block;padding:0.6rem 1.2rem;background:var(--accent);color:#fff;'
-        f'border-radius:6px;text-decoration:none;font-weight:600;font-size:0.95rem;">'
-        f'View Full Report &rarr;</a>'
-    )
-
-    # --- Repo traffic-light table ---
-    return section_html("security-audit", "Security Audit", total, content)
-
-
 def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data=None, codecov_data=None, supply_chain_data=None, security_audit_data=None, gh_token=""):
     now_str = datetime.now(IST).strftime("%Y-%m-%d %H:%M IST")
 
@@ -1196,7 +1182,6 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
     renovate_section = build_renovate_section(renovate_data)
     sonar_section = build_sonar_section(sonar_data)
     supply_chain_section = build_supply_chain_section(supply_chain_data)
-    security_audit_section = build_security_audit_section(security_audit_data)
 
     section_list = [
         ("repo-status", "Repos", repo_status_section),
@@ -1204,7 +1189,6 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
         ("correlation", "Correlation", correlation_section),
         ("prs", "PRs", pr_section),
         ("supply-chain", "Supply Chain", supply_chain_section),
-        ("security-audit", "Security Audit", security_audit_section),
         ("codecov", "Coverage", codecov_section),
         ("deps", "Dependencies", renovate_section),
         ("sonar", "SonarCloud", sonar_section),
