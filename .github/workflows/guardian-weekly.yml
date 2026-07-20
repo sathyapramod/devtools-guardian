@@ -107,7 +107,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add reports/ docs/audit.html
+          git add reports/ && git add -f docs/audit.html
           git diff --cached --quiet || git commit -m "chore: update weekly security audit reports [skip ci]"
           git push
 
