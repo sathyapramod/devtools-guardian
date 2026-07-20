@@ -136,6 +136,9 @@ python3 scripts/diff_snapshots.py \
 - `reports/changes.json` — structured deltas (new failures, became stale, newly overdue, …)
 - `reports/previous-snapshot.json` — compact baseline rotated after each successful diff (when `--write-previous` is set)
 
+In CI, the previous baseline is loaded from the published GitHub Pages
+`snapshot.json` (not committed to `main`), then redeployed with the Pages artifact.
+
 **Summary keys:** `new_failures`, `resolved_failures`, `new_flaky`, `became_stale`,
 `became_ready`, `newly_opened`, `closed_or_merged`, `newly_overdue`, `no_longer_overdue`.
 

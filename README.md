@@ -48,6 +48,10 @@ The dashboard is automatically deployed via GitHub Actions:
 - **Daily** (9:00 + 15:00 IST) — PRs, CI status, dependencies, code coverage, failure correlation
 - **Weekly** (Monday 9:00 IST) — Full check including SonarCloud quality gates
 
+Cross-run deltas load the previous baseline from the published Pages file
+(`…/snapshot.json`) and redeploy an updated baseline with each run — no push
+to `main` (compatible with branch protection).
+
 View at: `https://sathyapramod.github.io/devtools-guardian/`
 
 To trigger manually: Actions tab > select workflow > Run workflow.
@@ -62,6 +66,7 @@ To trigger manually: Actions tab > select workflow > Run workflow.
 | CI / Pipeline Health | Failing and flaky workflows with failing job details |
 | Failure Correlation | Cross-repo failure clustering (temporal, shared job, dependency) |
 | Open Pull Requests | PRs by category (ready, review, blocked, stale, draft) |
+| Supply Chain Audit | Post-approval commits, bot-only approvals (expandable, below Open PRs) |
 | Code Coverage | Codecov coverage per repo with lines/hits/misses |
 | Dependency Updates | Overdue and pending dependency PRs |
 | SonarCloud Quality | Quality gate status, bugs, vulnerabilities, code smells |
@@ -168,7 +173,5 @@ devtools-guardian/
 │   ├── SKILL.md
 │   └── references/
 │       └── commands.md
-└── reports/                  # Generated output (mostly gitignored)
-    ├── previous-snapshot.json  # rotating baseline (tracked)
-    └── changes.json            # latest delta (tracked)
+└── reports/                  # Generated output (gitignored; local runs)
 ```

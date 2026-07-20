@@ -197,7 +197,7 @@ def build_action_items(prs_data, ci_data, renovate_data, sonar_data):
     return f'<div class="action-items"><h3>Priority Actions <span class="badge">{len(items)}</span></h3><ul>{rows}</ul></div>'
 
 
-def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_data=None, supply_chain_data=None, security_audit_data=None):
+def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_data=None, security_audit_data=None):
     cards = []
 
     if ci_data:
@@ -249,17 +249,6 @@ def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_dat
         cards.append(card_html("SonarCloud", status, f"{gate_ok} passing, {gate_fail} failing, {vulns} vulns"))
     else:
         cards.append(card_html("SonarCloud", "UNKNOWN", "No data"))
-
-    if supply_chain_data:
-        agg = supply_chain_data.get("aggregate", {})
-        critical = agg.get("critical_findings", 0)
-        post_appr = agg.get("total_post_approval", 0)
-        bot_only = agg.get("total_bot_only", 0)
-        total = post_appr + bot_only
-        status = "ERROR" if critical > 0 else ("WARN" if total > 0 else "OK")
-        cards.append(card_html("Supply Chain", status, f"{post_appr} post-approval, {bot_only} bot-only"))
-    else:
-        cards.append(card_html("Supply Chain", "UNKNOWN", "No data"))
 
     cards_html = '<div class="cards">' + "\n".join(cards) + "</div>"
 
@@ -1036,7 +1025,7 @@ def build_supply_chain_section(sc_data):
         content += '<p style="color:var(--ok-text);">No supply-chain findings in this period.</p>'
 
     total = agg.get("total_post_approval", 0) + agg.get("total_bot_only", 0) + len(all_vulns)
-    return section_html("supply-chain", "Supply Chain Audit", total, content)
+    return section_html("supply-chain", "Supply Chain Audit", total, content, collapsed=True)
 
 
 def build_correlation_section(correlation_data):
@@ -1249,7 +1238,7 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
         "%REPOS_JSON%", json.dumps(repos_list)
     )
 
-    health_cards = build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_data, supply_chain_data, security_audit_data)
+    health_cards = build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_data, security_audit_data)
     changes_section = build_changes_section(changes_data)
     action_items = build_action_items(prs_data, ci_data, renovate_data, sonar_data)
     repo_status_section = build_repo_status_section(ci_data, prs_data, codecov_data)
