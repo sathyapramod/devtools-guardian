@@ -76,7 +76,7 @@ jobs:
       - name: Run full security audit (collect + analyze)
         run: |
           START_DATE=$(date -d '7 days ago' +%Y-%m-%d)
-          END_DATE=$(date +%Y-%m-%d)
+          END_DATE=$(date -d 'yesterday' +%Y-%m-%d)
           CACHE_DIR=".supply-chain-audit/cache"
 
           python3 /tmp/team-devtools/.agents/skills/td-supply-chain-audit/scripts/collect.py \
@@ -85,7 +85,8 @@ jobs:
           python3 /tmp/team-devtools/.agents/skills/td-supply-chain-audit/scripts/analyze.py \
             --cache-dir "$CACHE_DIR"
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GUARDIAN_GH_TOKEN }}
+          PYTHONUNBUFFERED: "1"
 
       - name: Convert audit to dashboard format
         run: |
