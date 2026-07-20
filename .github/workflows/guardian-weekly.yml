@@ -12,7 +12,7 @@ on:
       - ".github/workflows/guardian-weekly.yml"
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -103,6 +103,18 @@ jobs:
             --cache-dir ".supply-chain-audit/cache/$CACHE_HASH" \
             --output docs/audit.html
 
+      - name: Diff against previous snapshot
+        run: |
+          python3 scripts/diff_snapshots.py \
+            --prs reports/open-prs.json \
+            --ci reports/ci-status.json \
+            --renovate reports/renovate-prs.json \
+            --codecov reports/codecov.json \
+            --sonar reports/sonar-gates.json \
+            --previous reports/previous-snapshot.json \
+            --output reports/changes.json \
+            --write-previous reports/previous-snapshot.json
+
       - name: Generate HTML dashboard
         run: |
           python3 scripts/generate_dashboard.py \
@@ -114,9 +126,18 @@ jobs:
             --correlation reports/correlation.json \
             --supply-chain reports/supply-chain.json \
             --security-audit reports/security-audit.json \
+            --changes reports/changes.json \
             --output docs/index.html
         env:
           GUARDIAN_GH_TOKEN: ${{ secrets.GUARDIAN_GH_TOKEN }}
+
+      - name: Commit rotating snapshot baseline
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f reports/previous-snapshot.json reports/changes.json
+          git diff --cached --quiet || git commit -m "chore: update guardian snapshot baseline [skip ci]"
+          git push
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

@@ -78,6 +78,79 @@ def section_html(section_id, title, count, content, collapsed=False):
 </details>'''
 
 
+def build_changes_section(changes_data):
+    """Render a Since last check delta panel from changes.json."""
+    if not changes_data:
+        return ""
+
+    if not changes_data.get("has_baseline", True):
+        return (
+            '<div class="action-items changes-section">'
+            "<h3>Since Last Check</h3>"
+            "<p>No previous snapshot yet — delta starts next run.</p>"
+            "</div>"
+        )
+
+    summary = changes_data.get("summary", {})
+    compared = changes_data.get("compared_to") or "previous run"
+    total = sum(summary.values()) if summary else 0
+
+    if total == 0:
+        return (
+            f'<div class="action-items ok changes-section">'
+            f"<h3>Since Last Check</h3>"
+            f"<p>No material changes since {esc(compared)}.</p>"
+            f"</div>"
+        )
+
+    def _items(entries, tag, cls, fmt):
+        rows = []
+        for e in entries[:8]:
+            rows.append(f'<li><span class="status {cls}">{tag}</span> {fmt(e)}</li>')
+        return rows
+
+    def _wf_link(e):
+        slug = esc(e.get("repo", "?"))
+        name = esc(e.get("workflow", "?"))
+        url = e.get("url", "")
+        link = f'<a href="{esc(url)}" target="_blank">{slug}</a>' if url else slug
+        return f"{link} — {name}"
+
+    def _pr_link(e):
+        slug = esc(e.get("repo", "?"))
+        num = e.get("number", "?")
+        title = esc((e.get("title") or "")[:50])
+        url = e.get("url", "")
+        label = f"{slug}#{num}"
+        link = f'<a href="{esc(url)}" target="_blank">{label}</a>' if url else label
+        return f"{link} — {title}" if title else link
+
+    rows = []
+    ci = changes_data.get("ci", {})
+    prs = changes_data.get("prs", {})
+    ren = changes_data.get("renovate", {})
+
+    rows += _items(ci.get("new_failures", []), "NEW FAIL", "error", _wf_link)
+    rows += _items(ci.get("resolved_failures", []), "RESOLVED", "ok", _wf_link)
+    rows += _items(ci.get("new_flaky", []), "NEW FLAKY", "warn", _wf_link)
+    rows += _items(prs.get("became_stale", []), "STALE", "warn", _pr_link)
+    rows += _items(prs.get("became_ready", []), "READY", "ok", _pr_link)
+    rows += _items(prs.get("newly_opened", []), "NEW PR", "neutral", _pr_link)
+    rows += _items(ren.get("newly_overdue", []), "OVERDUE", "error", _pr_link)
+    rows += _items(ren.get("no_longer_overdue", []), "DEP OK", "ok", _pr_link)
+
+    badges = (
+        f'<span class="badge">{total}</span> '
+        f'<span class="changes-meta">vs {esc(compared)}</span>'
+    )
+    return (
+        f'<div class="action-items changes-section">'
+        f"<h3>Since Last Check {badges}</h3>"
+        f"<ul>{''.join(rows)}</ul>"
+        f"</div>"
+    )
+
+
 def build_action_items(prs_data, ci_data, renovate_data, sonar_data):
     items = []
 
@@ -647,6 +720,10 @@ tbody tr:hover { background: #f8fafc; }
 .action-items li:last-child { border-bottom: none; }
 .action-items li:hover { background: var(--surface-hover); }
 .action-items .status { margin-right: 8px; }
+.changes-section .changes-meta {
+  font-size: 0.8rem; font-weight: 400; color: var(--text-muted); margin-left: 6px;
+}
+.changes-section p { margin: 0; color: var(--text-muted); font-size: 0.9rem; }
 
 ul { list-style: disc; padding-left: 1.5rem; margin-bottom: 1rem; }
 li { margin-bottom: 4px; font-size: 0.85rem; }
@@ -1156,7 +1233,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
-def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data=None, codecov_data=None, supply_chain_data=None, security_audit_data=None, gh_token=""):
+def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data=None, codecov_data=None, supply_chain_data=None, security_audit_data=None, changes_data=None, gh_token=""):
     now_str = datetime.now(IST).strftime("%Y-%m-%d %H:%M IST")
 
     repos_list = []
@@ -1173,6 +1250,7 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
     )
 
     health_cards = build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_data, supply_chain_data, security_audit_data)
+    changes_section = build_changes_section(changes_data)
     action_items = build_action_items(prs_data, ci_data, renovate_data, sonar_data)
     repo_status_section = build_repo_status_section(ci_data, prs_data, codecov_data)
     ci_section = build_ci_section(ci_data)
@@ -1248,6 +1326,8 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
 
 {health_cards}
 
+{changes_section}
+
 {action_items}
 
 {sections}
@@ -1296,6 +1376,7 @@ def main():
     parser.add_argument("--correlation", help="Failure correlation JSON file")
     parser.add_argument("--supply-chain", dest="supply_chain", help="Supply chain audit JSON file")
     parser.add_argument("--security-audit", dest="security_audit", help="Full security audit JSON file (from convert_audit.py)")
+    parser.add_argument("--changes", help="Since-last-check delta JSON (from diff_snapshots.py)")
     parser.add_argument("--gh-token", help="GitHub PAT for refresh button (or set GUARDIAN_GH_TOKEN env var)")
     parser.add_argument("--output", "-o", default="docs/index.html",
                         help="Output HTML file (default: docs/index.html)")
@@ -1309,13 +1390,17 @@ def main():
     correlation_data = load_json_safe(args.correlation)
     supply_chain_data = load_json_safe(args.supply_chain)
     security_audit_data = load_json_safe(args.security_audit)
+    changes_data = load_json_safe(args.changes)
 
     if not any([prs_data, ci_data, renovate_data, sonar_data, codecov_data, supply_chain_data, security_audit_data]):
         print("ERROR: No data files provided or loadable", file=sys.stderr)
         sys.exit(1)
 
     gh_token = args.gh_token or os.environ.get("GUARDIAN_GH_TOKEN", "")
-    html = generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation_data, codecov_data, supply_chain_data, security_audit_data, gh_token)
+    html = generate_dashboard(
+        prs_data, ci_data, renovate_data, sonar_data, correlation_data,
+        codecov_data, supply_chain_data, security_audit_data, changes_data, gh_token,
+    )
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, "w") as f:

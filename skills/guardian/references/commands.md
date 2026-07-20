@@ -119,6 +119,28 @@ python3 scripts/correlate_failures.py --ci reports/ci-status.json -o reports/cor
 - `shared_job` — same job name failing across 2+ repos
 - `dependency` — failing dependency PR + downstream test failures
 
+## diff_snapshots.py
+
+```bash
+# Compare current fetch JSON to the rotating baseline
+python3 scripts/diff_snapshots.py \
+  --prs reports/open-prs.json \
+  --ci reports/ci-status.json \
+  --renovate reports/renovate-prs.json \
+  --previous reports/previous-snapshot.json \
+  --output reports/changes.json \
+  --write-previous reports/previous-snapshot.json
+```
+
+**Outputs:**
+- `reports/changes.json` — structured deltas (new failures, became stale, newly overdue, …)
+- `reports/previous-snapshot.json` — compact baseline rotated after each successful diff (when `--write-previous` is set)
+
+**Summary keys:** `new_failures`, `resolved_failures`, `new_flaky`, `became_stale`,
+`became_ready`, `newly_opened`, `closed_or_merged`, `newly_overdue`, `no_longer_overdue`.
+
+If `--previous` is missing, `has_baseline` is false and lists are empty (first-run case).
+
 ## generate_report.py
 
 ```bash
@@ -129,8 +151,8 @@ python3 scripts/generate_report.py renovate reports/renovate-prs.json
 python3 scripts/generate_report.py codecov reports/codecov.json
 python3 scripts/generate_report.py sonar reports/sonar-gates.json
 
-# Consolidated reports
-python3 scripts/generate_report.py guardian --prs FILE --ci FILE --renovate FILE --codecov FILE --sonar FILE
+# Consolidated reports (include --changes for Since Last Check)
+python3 scripts/generate_report.py guardian --prs FILE --ci FILE --renovate FILE --codecov FILE --sonar FILE --changes reports/changes.json
 python3 scripts/generate_report.py handoff --prs FILE --ci FILE --renovate FILE --codecov FILE --sonar FILE
 
 # Write to file
@@ -140,7 +162,7 @@ python3 scripts/generate_report.py prs reports/open-prs.json -o reports/pr-dashb
 ## run_guardian_check.py
 
 ```bash
-# Daily (PRs + CI + Dependencies + Coverage)
+# Daily (PRs + CI + Dependencies + Coverage + snapshot diff)
 python3 scripts/run_guardian_check.py --mode daily
 
 # Weekly (Daily + SonarCloud)
@@ -151,3 +173,5 @@ python3 scripts/run_guardian_check.py --mode handoff
 ```
 
 **Exit codes:** 0 = all green, 1 = issues found, 2 = script errors.
+
+Also writes/updates `reports/changes.json` and `reports/previous-snapshot.json`.

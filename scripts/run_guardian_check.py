@@ -162,6 +162,44 @@ def main():
         else:
             print(f"WARN: Sonar config not found: {args.sonar_config}", file=sys.stderr)
 
+    previous_snapshot = os.path.join(args.reports_dir, "previous-snapshot.json")
+    changes_file = os.path.join(args.reports_dir, "changes.json")
+
+    print(f"\n{'='*60}", file=sys.stderr)
+    print("Diffing against previous snapshot...", file=sys.stderr)
+    print(f"{'='*60}", file=sys.stderr)
+
+    diff_args = [
+        "--previous", previous_snapshot,
+        "--output", changes_file,
+        "--write-previous", previous_snapshot,
+    ]
+    if os.path.exists(prs_file):
+        diff_args.extend(["--prs", prs_file])
+    if os.path.exists(ci_file):
+        diff_args.extend(["--ci", ci_file])
+    if os.path.exists(renovate_file):
+        diff_args.extend(["--renovate", renovate_file])
+    if os.path.exists(codecov_file):
+        diff_args.extend(["--codecov", codecov_file])
+    if include_sonar and os.path.exists(sonar_file):
+        diff_args.extend(["--sonar", sonar_file])
+
+    # diff_snapshots writes files itself (not stdout JSON like fetch scripts)
+    if any(os.path.exists(f) for f in [prs_file, ci_file, renovate_file]):
+        diff_script = os.path.join(SCRIPTS_DIR, "diff_snapshots.py")
+        diff_cmd = [sys.executable, diff_script] + diff_args
+        try:
+            diff_result = subprocess.run(diff_cmd, capture_output=True, text=True, timeout=60)
+            if diff_result.stderr:
+                print(diff_result.stderr, file=sys.stderr)
+            if diff_result.returncode != 0:
+                print("WARN: Snapshot diff failed", file=sys.stderr)
+                errors += 1
+        except subprocess.TimeoutExpired:
+            print("WARN: Snapshot diff timed out", file=sys.stderr)
+            errors += 1
+
     print(f"\n{'='*60}", file=sys.stderr)
     print("Generating reports...", file=sys.stderr)
     print(f"{'='*60}", file=sys.stderr)
@@ -197,6 +235,8 @@ def main():
         guardian_args.extend(["--codecov", codecov_file])
     if include_sonar and os.path.exists(sonar_file):
         guardian_args.extend(["--sonar", sonar_file])
+    if os.path.exists(changes_file):
+        guardian_args.extend(["--changes", changes_file])
 
     guardian_report = os.path.join(args.reports_dir, f"guardian-{args.mode}-{date_str}.md")
     generate_report("guardian", guardian_args, guardian_report)
