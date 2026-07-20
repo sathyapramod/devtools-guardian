@@ -2,7 +2,7 @@
 
 Automated monitoring and reporting for the Ansible Devtools Guardian role.
 
-Fetches CI health, PR status, dependency updates, code coverage (Codecov), and SonarCloud quality gates across 18 Ansible Devtools repositories. Generates a live HTML dashboard deployed to GitHub Pages, markdown reports for Jira handoffs, and correlates CI failures to identify shared root causes.
+Fetches CI health, PR status, dependency updates, code coverage (Codecov), and SonarCloud quality gates across 18 Ansible Devtools repositories. Generates a live HTML dashboard deployed to GitHub Pages, markdown reports for Jira handoffs, correlates CI failures to identify shared root causes, and diffs each run against the previous snapshot (“Since last check”).
 
 ## Quick Start
 
@@ -35,8 +35,9 @@ Reports are generated in `reports/` as markdown and JSON files.
 | `fetch_codecov.py` | Code coverage from Codecov API | `python3 scripts/fetch_codecov.py --codecov-config config/codecov.json` |
 | `fetch_sonar_gates.py` | SonarCloud quality gate status and metrics | `python3 scripts/fetch_sonar_gates.py --sonar-config config/sonar.json` |
 | `correlate_failures.py` | CI failure correlation across repos | `python3 scripts/correlate_failures.py --ci FILE --renovate FILE` |
+| `diff_snapshots.py` | Cross-run delta vs previous snapshot | `python3 scripts/diff_snapshots.py --prs FILE --ci FILE --renovate FILE` |
 | `generate_report.py` | Markdown reports (prs, ci, renovate, codecov, sonar, guardian, handoff) | `python3 scripts/generate_report.py guardian --prs FILE --ci FILE` |
-| `generate_dashboard.py` | Self-contained HTML dashboard | `python3 scripts/generate_dashboard.py --prs FILE --ci FILE -o docs/index.html` |
+| `generate_dashboard.py` | Self-contained HTML dashboard | `python3 scripts/generate_dashboard.py --prs FILE --ci FILE --changes FILE -o docs/index.html` |
 
 All fetch scripts output JSON to stdout. Pipe to a file or pass to the report generators.
 
@@ -56,6 +57,7 @@ To trigger manually: Actions tab > select workflow > Run workflow.
 | Section | Description |
 |---|---|
 | Health Overview | Summary cards for CI, PRs, Dependencies, Coverage, SonarCloud |
+| Since Last Check | Deltas vs previous snapshot (new failures, newly stale PRs, newly overdue deps) |
 | Repository Status | Per-repo grid showing CI status, coverage %, and open PR count (matches the [official DevTools status page](https://docs.ansible.com/projects/team-devtools/stats/repos/)) |
 | CI / Pipeline Health | Failing and flaky workflows with failing job details |
 | Failure Correlation | Cross-repo failure clustering (temporal, shared job, dependency) |
@@ -143,9 +145,10 @@ Add a new repo by appending to `repos.json`. Add its SonarCloud project to `sona
 devtools-guardian/
 ├── .claude-plugin/          # Claude Code plugin metadata
 │   └── plugin.json
-├── .github/workflows/       # GitHub Actions (daily + weekly cron)
+├── .github/workflows/       # GitHub Actions (daily + weekly + watchdog)
 │   ├── guardian-daily.yml
-│   └── guardian-weekly.yml
+│   ├── guardian-weekly.yml
+│   └── guardian-watchdog.yml
 ├── config/
 │   ├── repos.json           # 17 tracked repositories with CI workflow config
 │   ├── sonar.json           # SonarCloud project mappings
@@ -157,6 +160,7 @@ devtools-guardian/
 │   ├── fetch_codecov.py
 │   ├── fetch_sonar_gates.py
 │   ├── correlate_failures.py
+│   ├── diff_snapshots.py
 │   ├── generate_report.py
 │   ├── generate_dashboard.py
 │   └── run_guardian_check.py
@@ -164,5 +168,7 @@ devtools-guardian/
 │   ├── SKILL.md
 │   └── references/
 │       └── commands.md
-└── reports/                  # Generated output (gitignored)
+└── reports/                  # Generated output (mostly gitignored)
+    ├── previous-snapshot.json  # rotating baseline (tracked)
+    └── changes.json            # latest delta (tracked)
 ```

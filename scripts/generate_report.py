@@ -640,7 +640,78 @@ def generate_codecov_report(data):
 # Consolidated Guardian Dashboard
 # ---------------------------------------------------------------------------
 
-def generate_guardian_report(prs_data, ci_data, renovate_data, sonar_data, codecov_data=None):
+def format_changes_section(changes_data):
+    """Markdown section for since-last-check deltas."""
+    lines = []
+    lines.append("## Since Last Check")
+    lines.append("")
+
+    if not changes_data:
+        lines.append("_No changes data available._")
+        lines.append("")
+        return lines
+
+    if not changes_data.get("has_baseline", True):
+        lines.append("No previous snapshot yet — delta starts next run.")
+        lines.append("")
+        return lines
+
+    compared = changes_data.get("compared_to") or "previous run"
+    summary = changes_data.get("summary", {})
+    total = sum(summary.values()) if summary else 0
+    lines.append(f"**Compared to:** {compared}")
+    lines.append("")
+
+    if total == 0:
+        lines.append("No material changes since the previous snapshot.")
+        lines.append("")
+        return lines
+
+    def _bullets(entries, label, fmt):
+        if not entries:
+            return
+        lines.append(f"### {label} ({len(entries)})")
+        lines.append("")
+        for e in entries[:15]:
+            lines.append(f"- {fmt(e)}")
+        lines.append("")
+
+    def _wf(e):
+        slug = e.get("repo", "?")
+        name = e.get("workflow", "?")
+        url = e.get("url", "")
+        if url:
+            return f"**[{slug}]({url})** — {name}"
+        return f"**{slug}** — {name}"
+
+    def _pr(e):
+        slug = e.get("repo", "?")
+        num = e.get("number", "?")
+        title = truncate(e.get("title", ""), 50)
+        url = e.get("url", "")
+        label = f"{slug}#{num}"
+        if url:
+            return f"**[{label}]({url})** — {title}"
+        return f"**{label}** — {title}"
+
+    ci = changes_data.get("ci", {})
+    prs = changes_data.get("prs", {})
+    ren = changes_data.get("renovate", {})
+
+    _bullets(ci.get("new_failures", []), "New CI failures", _wf)
+    _bullets(ci.get("resolved_failures", []), "Resolved CI failures", _wf)
+    _bullets(ci.get("new_flaky", []), "Newly flaky workflows", _wf)
+    _bullets(prs.get("became_stale", []), "PRs that became stale", _pr)
+    _bullets(prs.get("became_ready", []), "PRs that became ready", _pr)
+    _bullets(prs.get("newly_opened", []), "Newly opened PRs", _pr)
+    _bullets(prs.get("closed_or_merged", []), "Closed or merged PRs", _pr)
+    _bullets(ren.get("newly_overdue", []), "Newly overdue dependencies", _pr)
+    _bullets(ren.get("no_longer_overdue", []), "Dependencies no longer overdue", _pr)
+
+    return lines
+
+
+def generate_guardian_report(prs_data, ci_data, renovate_data, sonar_data, codecov_data=None, changes_data=None):
     """Generate a consolidated Guardian shift dashboard."""
     now_str = datetime.now(IST).strftime("%Y-%m-%d %H:%M IST")
     lines = []
@@ -649,6 +720,8 @@ def generate_guardian_report(prs_data, ci_data, renovate_data, sonar_data, codec
     lines.append("")
     lines.append(f"**Generated:** {now_str}")
     lines.append("")
+
+    lines.extend(format_changes_section(changes_data))
 
     lines.append("## Health Overview")
     lines.append("")
@@ -983,6 +1056,7 @@ def main():
     parser.add_argument("--renovate", help="Renovate data JSON (for guardian/handoff mode)")
     parser.add_argument("--sonar", help="SonarCloud data JSON (for guardian/handoff mode)")
     parser.add_argument("--codecov", help="Codecov data JSON (for guardian/handoff mode)")
+    parser.add_argument("--changes", help="Since-last-check delta JSON (from diff_snapshots.py)")
     args = parser.parse_args()
 
     if args.mode in SINGLE_INPUT_MODES:
@@ -997,9 +1071,12 @@ def main():
         renovate_data = load_json_safe(args.renovate)
         sonar_data = load_json_safe(args.sonar)
         codecov_data = load_json_safe(args.codecov)
+        changes_data = load_json_safe(args.changes)
 
         if args.mode == "guardian":
-            report = generate_guardian_report(prs_data, ci_data, renovate_data, sonar_data, codecov_data)
+            report = generate_guardian_report(
+                prs_data, ci_data, renovate_data, sonar_data, codecov_data, changes_data
+            )
         else:
             report = generate_handoff_report(prs_data, ci_data, renovate_data, sonar_data, codecov_data)
     else:

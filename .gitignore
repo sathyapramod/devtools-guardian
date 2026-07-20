@@ -1,6 +1,8 @@
 reports/*.json
 reports/*.md
 !reports/.gitkeep
+!reports/previous-snapshot.json
+!reports/changes.json
 
 # Generated dashboard
 docs/

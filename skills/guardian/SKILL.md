@@ -7,7 +7,8 @@ description: >
   Triggers include: "what's failing", "show stale PRs", "guardian check",
   "CI status", "pipeline health", "run daily check", "generate handoff",
   "sonar gates", "dependency updates", "correlate failures", "guardian report",
-  "PR dashboard", "what needs review", "security audit".
+  "PR dashboard", "what needs review", "security audit", "what changed",
+  "since last check", "deltas".
 version: 1.0.0
 ---
 
@@ -28,6 +29,7 @@ All scripts live in the devtools-guardian repo. The key paths are:
 - `scripts/fetch_renovate_prs.py` — dependency bot PRs with cooldown thresholds
 - `scripts/fetch_sonar_gates.py` — SonarCloud quality gate status and metrics
 - `scripts/correlate_failures.py` — CI failure correlation across repos
+- `scripts/diff_snapshots.py` — cross-run delta ("what changed since last check")
 - `scripts/generate_report.py` — markdown reports (modes: prs, ci, renovate, sonar, guardian, handoff)
 - `scripts/generate_dashboard.py` — self-contained HTML dashboard
 - `scripts/run_guardian_check.py` — orchestrator (modes: daily, weekly, handoff)
@@ -47,6 +49,39 @@ python3 scripts/run_guardian_check.py --mode daily
 
 This produces JSON data in `reports/` and a consolidated markdown report.
 After running, read `reports/guardian-daily-*.md` and present a summary.
+**Lead with the "Since Last Check" section** (from `reports/changes.json`) —
+new failures, newly stale PRs, newly overdue deps — before the full snapshot.
+
+### `changed` — What changed since last check
+
+If fetch JSON already exists (or after a `check`), summarize deltas only:
+
+```bash
+python3 scripts/diff_snapshots.py \
+  --prs reports/open-prs.json \
+  --ci reports/ci-status.json \
+  --renovate reports/renovate-prs.json \
+  --previous reports/previous-snapshot.json \
+  --output reports/changes.json
+```
+
+Or with dated local orchestrator outputs:
+
+```bash
+python3 scripts/diff_snapshots.py \
+  --prs reports/open-prs-$(date -u +%Y-%m-%d).json \
+  --ci reports/ci-status-$(date -u +%Y-%m-%d).json \
+  --renovate reports/renovate-prs-$(date -u +%Y-%m-%d).json \
+  --previous reports/previous-snapshot.json \
+  --output reports/changes.json
+```
+
+Parse `reports/changes.json` and present:
+- New / resolved CI failures and newly flaky workflows
+- PRs that became stale or ready; newly opened / closed
+- Newly overdue (or cleared) dependency PRs
+
+If `has_baseline` is false, say this is the first snapshot and deltas start next run.
 
 ### `audit` — Weekly security audit
 
@@ -142,10 +177,11 @@ Parse the JSON output and explain each cluster:
 ## Response Guidelines
 
 1. **Always run the scripts first** — don't guess at the current state. The data changes frequently.
-2. **Prioritize action items** — merge-ready PRs, security dependency updates, and failing CI are most urgent.
-3. **Be specific** — include repo names, PR numbers, workflow names, and links.
-4. **Suggest next steps** — don't just report; recommend what the Guardian should do.
-5. **For correlations** — explain the likely root cause in plain language and suggest a single investigation path rather than N separate ones.
+2. **Lead with deltas** — when `reports/changes.json` exists, summarize "since last check" before the full snapshot.
+3. **Prioritize action items** — merge-ready PRs, security dependency updates, and failing CI are most urgent.
+4. **Be specific** — include repo names, PR numbers, workflow names, and links.
+5. **Suggest next steps** — don't just report; recommend what the Guardian should do.
+6. **For correlations** — explain the likely root cause in plain language and suggest a single investigation path rather than N separate ones.
 
 ## Reference
 
