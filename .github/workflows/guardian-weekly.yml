@@ -64,7 +64,7 @@ jobs:
       - name: Fetch supply-chain audit
         run: python3 scripts/fetch_supply_chain.py --repos-file config/repos.json --days 7 --skip-vulns -o reports/supply-chain.json
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AUDIT_GH_TOKEN }}
 
       - name: Clone audit scripts
         run: |
@@ -85,7 +85,7 @@ jobs:
           python3 /tmp/team-devtools/.agents/skills/td-supply-chain-audit/scripts/analyze.py \
             --cache-dir "$CACHE_DIR"
         env:
-          GH_TOKEN: ${{ secrets.GUARDIAN_GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.AUDIT_GH_TOKEN }}
           PYTHONUNBUFFERED: "1"
 
       - name: Convert audit to dashboard format
