@@ -62,13 +62,122 @@ def status_label(status):
     return mapping.get(status, status)
 
 
-def card_html(title, status, detail):
+def card_html(title, status, detail, weight="normal"):
     cls = status_class(status)
-    return f'''<div class="card {cls}">
+    weight_cls = f" card-weight-{weight}" if weight != "normal" else ""
+    return f'''<div class="card {cls}{weight_cls}">
   <div class="card-title">{esc(title)}</div>
   <div class="card-status">{esc(status_label(status))}</div>
   <div class="card-detail">{esc(detail)}</div>
 </div>'''
+
+
+def _count_attention(ci_data, prs_data, renovate_data, sonar_data):
+    """Count high-urgency signals for the hero thesis."""
+    n = 0
+    if ci_data:
+        agg = ci_data.get("aggregate", ci_data.get("summary", {}))
+        n += agg.get("failing", 0)
+    if prs_data:
+        agg = prs_data.get("aggregate", prs_data.get("summary", {}))
+        n += agg.get("blocked", 0)
+    if renovate_data:
+        agg = renovate_data.get("aggregate", renovate_data.get("summary", {}))
+        n += agg.get("security", 0) + agg.get("overdue", 0)
+    if sonar_data:
+        agg = sonar_data.get("aggregate", {})
+        n += agg.get("gate_error", 0)
+    return n
+
+
+def build_hero(now_str, ci_data, prs_data, renovate_data, sonar_data, repo_count=0):
+    """Brand-first hero with a single attention thesis."""
+    attention = _count_attention(ci_data, prs_data, renovate_data, sonar_data)
+    if attention == 0:
+        thesis = "Fleet is quiet — nothing urgent on this scan."
+        thesis_cls = "ok"
+    elif attention == 1:
+        thesis = "1 signal needs you before the next check."
+        thesis_cls = "warn"
+    else:
+        thesis = f"{attention} signals need you before the next check."
+        thesis_cls = "error"
+
+    repo_bit = f"{repo_count} repos" if repo_count else "Ansible Devtools"
+    return f'''<header class="hero">
+  <div class="hero-brand">
+    <p class="hero-kicker">Ansible Devtools</p>
+    <h1>Guardian</h1>
+  </div>
+  <p class="hero-thesis {thesis_cls}">{esc(thesis)}</p>
+  <p class="hero-meta">Shift board · {esc(repo_bit)} · scanned {esc(now_str)}</p>
+</header>'''
+
+
+def build_fleet_strip(ci_data, prs_data):
+    """Signature element: one-cell-per-repo fleet status strip."""
+    ci_by = {}
+    if ci_data:
+        for repo in ci_data.get("results", []):
+            slug = f"{repo.get('owner', '?')}/{repo.get('repo', '?')}"
+            ci_by[slug] = repo
+
+    pr_by = {}
+    if prs_data:
+        for repo in prs_data.get("results", []):
+            slug = f"{repo.get('owner', '?')}/{repo.get('repo', '?')}"
+            pr_by[slug] = repo.get("summary", {})
+
+    slugs = sorted(set(list(ci_by.keys()) + list(pr_by.keys())))
+    if not slugs:
+        return ""
+
+    cells = []
+    for i, slug in enumerate(slugs):
+        name = slug.split("/", 1)[-1]
+        ci_repo = ci_by.get(slug, {})
+        primary = ci_repo.get("primary_ci") or {}
+        summary = ci_repo.get("summary", {})
+        pr_s = pr_by.get(slug, {})
+
+        state = "ok"
+        tip_parts = []
+        if primary.get("status") == "failure" or summary.get("failing", 0) > 0:
+            state = "error"
+            tip_parts.append("CI failing")
+        elif summary.get("flaky", 0) > 0:
+            state = "warn"
+            tip_parts.append("flaky CI")
+        elif pr_s.get("blocked", 0) > 0:
+            state = "warn"
+            tip_parts.append(f"{pr_s['blocked']} blocked PRs")
+        elif pr_s.get("stale", 0) > 0:
+            if state == "ok":
+                state = "warn"
+            tip_parts.append(f"{pr_s['stale']} stale PRs")
+
+        if not tip_parts:
+            tip_parts.append("healthy")
+
+        delay = min(i * 28, 400)
+        cells.append(
+            f'<a class="fleet-cell {state}" href="https://github.com/{esc(slug)}" '
+            f'target="_blank" title="{esc(slug)} — {esc(", ".join(tip_parts))}" '
+            f'style="--d:{delay}ms">'
+            f'<span class="fleet-dot" aria-hidden="true"></span>'
+            f'<span class="fleet-name">{esc(name)}</span>'
+            f"</a>"
+        )
+
+    return (
+        '<section class="fleet" aria-label="Fleet status">'
+        '<div class="fleet-head">'
+        '<h2>Fleet</h2>'
+        '<p>One cell per repo — red needs a look, amber is soft risk, teal is clear.</p>'
+        "</div>"
+        f'<div class="fleet-grid">{"".join(cells)}</div>'
+        "</section>"
+    )
 
 
 def section_html(section_id, title, count, content, collapsed=False):
@@ -85,9 +194,9 @@ def build_changes_section(changes_data):
 
     if not changes_data.get("has_baseline", True):
         return (
-            '<div class="action-items changes-section">'
-            "<h3>Since Last Check</h3>"
-            "<p>No previous snapshot yet — delta starts next run.</p>"
+            '<div class="panel changes-section">'
+            "<h3>Since last check</h3>"
+            "<p>First scan on this baseline — compare starts on the next run.</p>"
             "</div>"
         )
 
@@ -97,8 +206,8 @@ def build_changes_section(changes_data):
 
     if total == 0:
         return (
-            f'<div class="action-items ok changes-section">'
-            f"<h3>Since Last Check</h3>"
+            f'<div class="panel changes-section ok">'
+            f"<h3>Since last check</h3>"
             f"<p>No material changes since {esc(compared)}.</p>"
             f"</div>"
         )
@@ -144,8 +253,8 @@ def build_changes_section(changes_data):
         f'<span class="changes-meta">vs {esc(compared)}</span>'
     )
     return (
-        f'<div class="action-items changes-section">'
-        f"<h3>Since Last Check {badges}</h3>"
+        f'<div class="panel changes-section">'
+        f"<h3>Since last check {badges}</h3>"
         f"<ul>{''.join(rows)}</ul>"
         f"</div>"
     )
@@ -188,13 +297,23 @@ def build_action_items(prs_data, ci_data, renovate_data, sonar_data):
                 items.append(("warn", "SONAR GATE", f"{esc(slug)} — quality gate failing"))
 
     if not items:
-        return '<div class="action-items ok"><h3>Priority Actions</h3><p>All systems healthy. No urgent action items.</p></div>'
+        return (
+            '<div class="panel action-items ok">'
+            "<h3>Do next</h3>"
+            "<p>Nothing urgent — skim the fleet strip, then move on.</p>"
+            "</div>"
+        )
 
     rows = ""
     for cls, tag, detail in items:
         rows += f'<li><span class="status {cls}">{tag}</span> {detail}</li>'
 
-    return f'<div class="action-items"><h3>Priority Actions <span class="badge">{len(items)}</span></h3><ul>{rows}</ul></div>'
+    return (
+        f'<div class="panel action-items">'
+        f'<h3>Do next <span class="badge">{len(items)}</span></h3>'
+        f"<ul>{rows}</ul>"
+        f"</div>"
+    )
 
 
 def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_data=None, security_audit_data=None):
@@ -205,9 +324,10 @@ def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_dat
         failing = agg.get("failing", 0)
         flaky = agg.get("flaky", 0)
         status = "OK" if failing == 0 and flaky == 0 else ("WARN" if failing == 0 else "ERROR")
-        cards.append(card_html("CI / Pipeline", status, f"{failing} failing, {flaky} flaky"))
+        weight = "hot" if failing > 0 else "normal"
+        cards.append(card_html("Pipelines", status, f"{failing} failing · {flaky} flaky", weight))
     else:
-        cards.append(card_html("CI / Pipeline", "UNKNOWN", "No data"))
+        cards.append(card_html("Pipelines", "UNKNOWN", "Run a scan to load pipeline status"))
 
     if prs_data:
         agg = prs_data.get("aggregate", prs_data.get("summary", {}))
@@ -216,9 +336,10 @@ def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_dat
         blocked = agg.get("blocked", 0)
         total = agg.get("total_prs", 0)
         status = "OK" if blocked == 0 and stale == 0 else ("WARN" if blocked == 0 else "ERROR")
-        cards.append(card_html("Open PRs", status, f"{total} total, {ready} ready, {stale} stale"))
+        weight = "hot" if blocked > 0 else ("warm" if stale > 0 else "normal")
+        cards.append(card_html("Pull requests", status, f"{total} open · {ready} ready · {stale} stale", weight))
     else:
-        cards.append(card_html("Open PRs", "UNKNOWN", "No data"))
+        cards.append(card_html("Pull requests", "UNKNOWN", "Run a scan to load open PRs"))
 
     if renovate_data:
         agg = renovate_data.get("aggregate", renovate_data.get("summary", {}))
@@ -226,9 +347,10 @@ def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_dat
         security = agg.get("security", 0)
         total = agg.get("total_prs", agg.get("total", 0))
         status = "ERROR" if security > 0 else ("WARN" if overdue > 0 else "OK")
-        cards.append(card_html("Dependencies", status, f"{total} open, {overdue} overdue"))
+        weight = "hot" if security > 0 else ("warm" if overdue > 0 else "normal")
+        cards.append(card_html("Dependencies", status, f"{total} open · {overdue} overdue · {security} security", weight))
     else:
-        cards.append(card_html("Dependencies", "UNKNOWN", "No data"))
+        cards.append(card_html("Dependencies", "UNKNOWN", "Run a scan to load dependency PRs"))
 
     if codecov_data:
         agg = codecov_data.get("aggregate", {})
@@ -236,9 +358,9 @@ def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_dat
         below_50 = agg.get("repos_below_50", 0)
         above_80 = agg.get("repos_above_80", 0)
         status = "OK" if below_50 == 0 else ("WARN" if avg_cov >= 50 else "ERROR")
-        cards.append(card_html("Code Coverage", status, f"{avg_cov}% avg, {above_80} above 80%"))
+        cards.append(card_html("Coverage", status, f"{avg_cov}% avg · {above_80} above 80%"))
     else:
-        cards.append(card_html("Code Coverage", "UNKNOWN", "No data"))
+        cards.append(card_html("Coverage", "UNKNOWN", "Codecov data not in this scan"))
 
     if sonar_data:
         agg = sonar_data.get("aggregate", {})
@@ -246,9 +368,10 @@ def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_dat
         vulns = agg.get("total_vulnerabilities", 0)
         gate_ok = agg.get("gate_ok", 0)
         status = "ERROR" if gate_fail > 0 else "OK"
-        cards.append(card_html("SonarCloud", status, f"{gate_ok} passing, {gate_fail} failing, {vulns} vulns"))
+        weight = "hot" if gate_fail > 0 else "normal"
+        cards.append(card_html("SonarCloud", status, f"{gate_ok} passing · {gate_fail} failing · {vulns} vulns", weight))
     else:
-        cards.append(card_html("SonarCloud", "UNKNOWN", "No data"))
+        cards.append(card_html("SonarCloud", "UNKNOWN", "Quality gates not in this scan"))
 
     cards_html = '<div class="cards">' + "\n".join(cards) + "</div>"
 
@@ -257,7 +380,6 @@ def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_dat
         crit = risk.get("critical", 0)
         high = risk.get("high", 0)
         med = risk.get("medium", 0)
-        total_findings = security_audit_data.get("total_findings", 0)
         window = security_audit_data.get("audit_window", "")
 
         badges = ""
@@ -265,18 +387,15 @@ def build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_dat
             if count == 0:
                 continue
             bcls = "error" if level in ("critical", "high") else "warn"
-            badges += f'<span class="status {bcls}" style="margin-left:0.5rem;padding:0.15rem 0.5rem;font-size:0.8rem;">{count} {level}</span>'
+            badges += f'<span class="status {bcls}">{count} {level}</span>'
 
         cards_html += (
-            f'<a href="audit.html" target="_blank" style="text-decoration:none;display:block;'
-            f'margin:-12px 0 24px;padding:10px 16px;border-radius:8px;'
-            f'border:1px solid var(--border);'
-            f'background:var(--card-bg);color:var(--text);">'
-            f'<span style="font-weight:600;">Security Audit</span>'
-            f'{badges}'
-            f'<span style="color:var(--text-muted);margin-left:0.75rem;font-size:0.85rem;">{esc(window)}</span>'
-            f'<span style="float:right;font-weight:600;color:var(--accent);">View Full Report &rarr;</span>'
-            f'</a>'
+            f'<a class="audit-banner" href="audit.html" target="_blank">'
+            f"<strong>Security audit</strong>"
+            f"{badges}"
+            f'<span class="audit-window">{esc(window)}</span>'
+            f'<span class="audit-cta">Open report</span>'
+            f"</a>"
         )
 
     return cards_html
@@ -546,108 +665,270 @@ def build_sonar_section(sonar_data):
 
 CSS = """
 :root {
-  --bg: #f1f5f9;
-  --surface: #ffffff;
-  --surface-hover: #f8fafc;
-  --border: #e2e8f0;
-  --border-subtle: #edf2f7;
-  --text: #1e293b;
-  --text-muted: #64748b;
-  --text-dim: #94a3b8;
-  --accent: #3C50E0;
-  --accent-hover: #3545C8;
-  --accent-bg: rgba(60, 80, 224, 0.08);
-  --accent-light: #2d3cc4;
-  --ok: #10B981;
-  --ok-bg: rgba(16, 185, 129, 0.08);
-  --ok-text: #059669;
-  --warn: #F59E0B;
-  --warn-bg: rgba(245, 158, 11, 0.08);
-  --warn-text: #D97706;
-  --error: #EF4444;
-  --error-bg: rgba(239, 68, 68, 0.08);
-  --error-text: #DC2626;
-  --neutral: #cbd5e1;
-  --neutral-text: #64748b;
-  --link: #3C50E0;
-  --radius: 12px;
-  --radius-sm: 8px;
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.04);
-  --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  --ink: #1B2128;
+  --slate: #4A5560;
+  --mist: #DCE1E6;
+  --paper: #F4F6F8;
+  --surface: #FFFFFF;
+  --surface-hover: #EEF1F4;
+  --border: #C5CDD6;
+  --border-subtle: #E2E6EB;
+  --text: var(--ink);
+  --text-muted: var(--slate);
+  --text-dim: #7A8692;
+  --accent: #C9190B;
+  --accent-hover: #A30000;
+  --accent-bg: rgba(201, 25, 11, 0.08);
+  --accent-light: #A30000;
+  --ok: #0F766E;
+  --ok-bg: rgba(15, 118, 110, 0.1);
+  --ok-text: #0F766E;
+  --warn: #B45309;
+  --warn-bg: rgba(180, 83, 9, 0.1);
+  --warn-text: #B45309;
+  --error: #C9190B;
+  --error-bg: rgba(201, 25, 11, 0.1);
+  --error-text: #C9190B;
+  --neutral: #C5CDD6;
+  --neutral-text: #4A5560;
+  --link: #1B3A4B;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow-sm: 0 1px 2px rgba(27, 33, 40, 0.05);
+  --shadow-md: 0 8px 24px rgba(27, 33, 40, 0.08);
+  --transition: 0.18s ease;
+  --font-display: "Space Grotesk", "Segoe UI", sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --bg: var(--paper);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  background: var(--bg); color: var(--text); line-height: 1.6;
-  padding: 24px 32px; max-width: 1280px; margin: 0 auto;
-  min-height: 100vh; -webkit-font-smoothing: antialiased;
+  font-family: var(--font-body);
+  background:
+    radial-gradient(1200px 500px at 10% -10%, rgba(201, 25, 11, 0.06), transparent 55%),
+    linear-gradient(180deg, #E8ECF0 0%, var(--paper) 42%);
+  color: var(--text);
+  line-height: 1.55;
+  padding: 28px 32px 48px;
+  max-width: 1180px;
+  margin: 0 auto;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
 }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 
-header { margin-bottom: 24px; }
-header h1 {
-  font-size: 1.6rem; font-weight: 700; color: var(--text); letter-spacing: -0.02em;
+.hero { margin-bottom: 22px; }
+.hero-kicker {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
 }
-header .subtitle { color: var(--text-muted); font-size: 0.85rem; margin-top: 4px; }
-header .accent-line {
-  height: 3px; width: 48px; margin-top: 12px; border-radius: 2px;
-  background: var(--accent);
+.hero h1 {
+  font-family: var(--font-display);
+  font-size: clamp(2.4rem, 5vw, 3.4rem);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: var(--ink);
+}
+.hero-thesis {
+  margin-top: 14px;
+  font-family: var(--font-display);
+  font-size: clamp(1.15rem, 2.4vw, 1.45rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  max-width: 36rem;
+}
+.hero-thesis.ok { color: var(--ok-text); }
+.hero-thesis.warn { color: var(--warn-text); }
+.hero-thesis.error { color: var(--error-text); }
+.hero-meta {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-dim);
 }
 
 a { color: var(--link); text-decoration: none; transition: color var(--transition); }
-a:hover { color: var(--accent-light); }
+a:hover { color: var(--accent); }
+a:focus-visible, button:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
-/* --- Health Cards --- */
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 20px; margin-bottom: 24px; }
+/* Signature: fleet strip */
+.fleet {
+  margin: 8px 0 28px;
+  padding: 18px 18px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.fleet-head {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 16px;
+  margin-bottom: 14px;
+}
+.fleet-head h2 {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 600;
+}
+.fleet-head p {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+.fleet-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 8px;
+}
+.fleet-cell {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--paper);
+  color: var(--text);
+  text-decoration: none;
+  min-height: 44px;
+  opacity: 0;
+  transform: translateY(6px);
+  animation: fleetIn 0.45s ease forwards;
+  animation-delay: var(--d, 0ms);
+  transition: border-color var(--transition), background var(--transition), transform var(--transition);
+}
+.fleet-cell:hover {
+  border-color: var(--border);
+  background: var(--surface-hover);
+  transform: translateY(-1px);
+  color: var(--text);
+}
+.fleet-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--ok);
+}
+.fleet-cell.error .fleet-dot {
+  background: var(--error);
+  box-shadow: 0 0 0 3px var(--error-bg);
+  animation: signalPulse 1.6s ease-in-out infinite;
+}
+.fleet-cell.warn .fleet-dot { background: var(--warn); }
+.fleet-cell.ok .fleet-dot { background: var(--ok); }
+.fleet-name {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes fleetIn {
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes signalPulse {
+  0%, 100% { box-shadow: 0 0 0 3px var(--error-bg); }
+  50% { box-shadow: 0 0 0 6px rgba(201, 25, 11, 0.05); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fleet-cell { opacity: 1; transform: none; animation: none; }
+  .fleet-cell.error .fleet-dot { animation: none; }
+  .live-dot { animation: none; }
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+  align-items: stretch;
+}
 .card {
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 20px 24px; border-left: 3px solid var(--neutral);
-  box-shadow: var(--shadow-sm); transition: box-shadow var(--transition);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 16px 14px;
+  border-top: 3px solid var(--neutral);
+  box-shadow: var(--shadow-sm);
 }
-.card:hover { box-shadow: var(--shadow-md); }
-.card.ok { border-left-color: var(--ok); }
-.card.error { border-left-color: var(--error); }
-.card.warn { border-left-color: var(--warn); }
+.card.ok { border-top-color: var(--ok); }
+.card.error { border-top-color: var(--error); }
+.card.warn { border-top-color: var(--warn); }
+.card-weight-hot {
+  grid-column: span 2;
+  box-shadow: var(--shadow-md);
+  background: linear-gradient(180deg, #fff 0%, #FFF5F4 100%);
+}
+.card-weight-warm { box-shadow: var(--shadow-md); }
 .card-title {
-  font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase;
-  letter-spacing: 0.08em; font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 500;
 }
-.card-status { font-size: 1.5rem; font-weight: 700; margin: 6px 0; }
+.card-status {
+  font-family: var(--font-display);
+  font-size: 1.55rem;
+  font-weight: 650;
+  margin: 6px 0 4px;
+  letter-spacing: -0.03em;
+}
 .card.ok .card-status { color: var(--ok-text); }
 .card.error .card-status { color: var(--error-text); }
 .card.warn .card-status { color: var(--warn-text); }
-.card-detail { font-size: 0.8rem; color: var(--text-muted); }
+.card-detail {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
 
-/* --- Nav Bar --- */
+.audit-banner {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+  margin: -4px 0 20px; padding: 12px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+}
+.audit-banner:hover { border-color: var(--accent); color: var(--text); }
+.audit-banner strong { font-family: var(--font-display); }
+.audit-window { color: var(--text-muted); font-size: 0.82rem; font-family: var(--font-mono); }
+.audit-cta { margin-left: auto; color: var(--accent); font-weight: 600; font-size: 0.85rem; }
+
 .nav-bar {
   display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
   position: sticky; top: 0; z-index: 100;
-  padding: 8px 12px; margin-bottom: 20px;
-  background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  padding: 8px 10px; margin-bottom: 18px;
+  background: rgba(244, 246, 248, 0.88);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border); border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
 }
 .nav-bar a {
-  font-size: 0.78rem; font-weight: 500; padding: 6px 12px; border-radius: 6px;
+  font-size: 0.78rem; font-weight: 500; padding: 6px 10px; border-radius: 6px;
   color: var(--text-muted); text-decoration: none; transition: all var(--transition);
+  font-family: var(--font-mono);
 }
 .nav-bar a:hover { background: var(--accent-bg); color: var(--accent); }
 
-/* --- Sections --- */
 .section {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  margin-bottom: 16px; scroll-margin-top: 3.5rem;
+  margin-bottom: 12px; scroll-margin-top: 3.5rem;
   box-shadow: var(--shadow-sm);
 }
 .section summary {
-  cursor: pointer; padding: 16px 20px; list-style: none;
+  cursor: pointer; padding: 14px 18px; list-style: none;
   transition: background var(--transition); border-radius: var(--radius);
 }
 .section summary::-webkit-details-marker { display: none; }
@@ -658,118 +939,126 @@ a:hover { color: var(--accent-light); }
 }
 .section[open] summary::before { transform: rotate(90deg); }
 .section summary:hover { background: var(--surface-hover); }
-.section summary h2 { display: inline; font-size: 1rem; font-weight: 600; vertical-align: middle; }
-.section > :not(summary) { padding: 0 20px 20px; }
+.section summary h2 {
+  display: inline; font-family: var(--font-display);
+  font-size: 1rem; font-weight: 600; vertical-align: middle;
+}
+.section > :not(summary) { padding: 0 18px 18px; }
 
 .badge {
   background: var(--accent-bg); color: var(--accent); font-size: 0.7rem; font-weight: 600;
   padding: 2px 8px; border-radius: 9999px; vertical-align: middle;
+  font-family: var(--font-mono);
 }
 
-h3 { font-size: 0.9rem; font-weight: 600; margin: 20px 0 8px; color: var(--text); }
+h3 { font-size: 0.9rem; font-weight: 600; margin: 18px 0 8px; color: var(--text); font-family: var(--font-display); }
 
-/* --- Tables --- */
-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.82rem; margin-bottom: 16px; }
+table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.82rem; margin-bottom: 14px; }
 thead th {
-  text-align: left; padding: 12px 16px; color: var(--text-muted); font-weight: 500;
-  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em;
-  background: #f8fafc; border-bottom: 1px solid var(--border);
+  text-align: left; padding: 10px 14px; color: var(--text-muted); font-weight: 500;
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+  background: var(--paper); border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
 }
-thead th:first-child { border-radius: var(--radius-sm) 0 0 0; }
-thead th:last-child { border-radius: 0 var(--radius-sm) 0 0; }
-td { padding: 14px 16px; border-bottom: 1px solid var(--border-subtle); }
+td { padding: 12px 14px; border-bottom: 1px solid var(--border-subtle); font-family: var(--font-mono); font-size: 0.78rem; }
 tbody tr { transition: background var(--transition); }
-tbody tr:hover { background: #f8fafc; }
+tbody tr:hover { background: var(--surface-hover); }
 
-/* --- Status Badges --- */
 .status {
-  display: inline-block; padding: 3px 10px; border-radius: 9999px;
-  font-size: 0.72rem; font-weight: 500;
+  display: inline-block; padding: 2px 8px; border-radius: 9999px;
+  font-size: 0.7rem; font-weight: 500; font-family: var(--font-mono);
 }
 .status.ok { background: var(--ok-bg); color: var(--ok-text); }
 .status.error { background: var(--error-bg); color: var(--error-text); }
 .status.warn { background: var(--warn-bg); color: var(--warn-text); }
-.status.neutral { background: #f1f5f9; color: var(--neutral-text); }
+.status.neutral { background: #E8ECF0; color: var(--neutral-text); }
 
-/* --- Action Items --- */
-.action-items {
+.panel {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 20px 24px; margin-bottom: 24px; border-left: 3px solid var(--accent);
+  padding: 18px 20px; margin-bottom: 16px;
   box-shadow: var(--shadow-sm);
 }
-.action-items h3 { margin: 0 0 12px; font-size: 1rem; font-weight: 600; }
-.action-items.ok { border-left-color: var(--ok); }
-.action-items.ok p { color: var(--ok-text); margin: 0; font-weight: 500; }
-.action-items ul { list-style: none; padding: 0; margin: 0; }
-.action-items li {
-  padding: 8px 10px; border-radius: 6px;
-  font-size: 0.82rem; transition: background var(--transition);
-  border-bottom: 1px solid var(--border-subtle);
+.panel h3 { margin: 0 0 10px; font-size: 1rem; }
+.panel.ok { border-left: 3px solid var(--ok); }
+.panel.ok p { color: var(--ok-text); margin: 0; font-weight: 500; }
+.action-items { border-left: 3px solid var(--accent); }
+.action-items ul, .changes-section ul { list-style: none; padding: 0; margin: 0; }
+.action-items li, .changes-section li {
+  padding: 8px 8px; border-radius: 6px;
+  font-size: 0.82rem; border-bottom: 1px solid var(--border-subtle);
 }
-.action-items li:last-child { border-bottom: none; }
-.action-items li:hover { background: var(--surface-hover); }
-.action-items .status { margin-right: 8px; }
+.action-items li:last-child, .changes-section li:last-child { border-bottom: none; }
+.action-items li:hover, .changes-section li:hover { background: var(--surface-hover); }
+.action-items .status, .changes-section .status { margin-right: 8px; }
 .changes-section .changes-meta {
-  font-size: 0.8rem; font-weight: 400; color: var(--text-muted); margin-left: 6px;
+  font-size: 0.78rem; font-weight: 400; color: var(--text-muted); margin-left: 6px;
+  font-family: var(--font-mono);
 }
 .changes-section p { margin: 0; color: var(--text-muted); font-size: 0.9rem; }
 
 ul { list-style: disc; padding-left: 1.5rem; margin-bottom: 1rem; }
 li { margin-bottom: 4px; font-size: 0.85rem; }
 
-/* --- Footer --- */
 .footer {
-  text-align: center; padding: 24px 0 16px; margin-top: 32px;
-  border-top: 1px solid var(--border); color: var(--text-dim); font-size: 0.8rem;
+  text-align: center; padding: 28px 0 8px; margin-top: 28px;
+  border-top: 1px solid var(--border); color: var(--text-dim); font-size: 0.78rem;
+  font-family: var(--font-mono);
 }
 .footer span { color: var(--accent); font-weight: 600; }
 
 [data-theme="dark"] {
-  --bg: #1A222C;
-  --surface: #24303F;
-  --surface-hover: #2E3A4A;
-  --border: #2E3A47;
-  --border-subtle: #333A48;
-  --text: #DEE4EE;
-  --text-muted: #8A99AF;
-  --text-dim: #6B7B93;
-  --accent-bg: rgba(60, 80, 224, 0.15);
-  --accent-light: #80CAEE;
-  --ok-bg: rgba(16, 185, 129, 0.12);
-  --ok-text: #34D399;
-  --warn-bg: rgba(245, 158, 11, 0.12);
-  --warn-text: #FBBF24;
-  --error-bg: rgba(239, 68, 68, 0.12);
-  --error-text: #F87171;
-  --neutral: #333A48;
-  --neutral-text: #8A99AF;
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.2), 0 1px 2px rgba(0,0,0,0.15);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.25), 0 2px 4px rgba(0,0,0,0.15);
+  --ink: #E8EDF2;
+  --slate: #9AA6B2;
+  --paper: #151A20;
+  --surface: #1E262F;
+  --surface-hover: #28313C;
+  --border: #33404C;
+  --border-subtle: #2A343E;
+  --text: var(--ink);
+  --text-muted: var(--slate);
+  --text-dim: #738190;
+  --accent-bg: rgba(201, 25, 11, 0.18);
+  --ok-bg: rgba(15, 118, 110, 0.18);
+  --warn-bg: rgba(180, 83, 9, 0.18);
+  --error-bg: rgba(201, 25, 11, 0.18);
+  --link: #B8D4E8;
+  --bg: var(--paper);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.25);
+  --shadow-md: 0 8px 24px rgba(0,0,0,0.35);
 }
-[data-theme="dark"] thead th { background: #2E3A47; }
-[data-theme="dark"] tbody tr:hover { background: rgba(255,255,255,0.02); }
-[data-theme="dark"] .status.neutral { background: rgba(51,58,72,0.5); }
-[data-theme="dark"] .nav-bar { background: rgba(26,34,44,0.92); }
+[data-theme="dark"] body {
+  background:
+    radial-gradient(1000px 420px at 8% -8%, rgba(201, 25, 11, 0.12), transparent 50%),
+    linear-gradient(180deg, #12171C 0%, var(--paper) 50%);
+}
+[data-theme="dark"] .card-weight-hot { background: linear-gradient(180deg, #1E262F 0%, #2A1C1B 100%); }
+[data-theme="dark"] thead th { background: #24303A; }
+[data-theme="dark"] .status.neutral { background: rgba(51,64,76,0.6); }
+[data-theme="dark"] .nav-bar { background: rgba(21, 26, 32, 0.9); }
+[data-theme="dark"] .fleet-cell { background: #182028; }
 
 .theme-toggle {
   display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px;
   border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface);
   color: var(--text-muted); font-size: 0.78rem; font-weight: 500;
   cursor: pointer; transition: all var(--transition);
+  font-family: var(--font-body);
 }
 .theme-toggle:hover { background: var(--surface-hover); color: var(--text); }
 .theme-toggle svg { width: 14px; height: 14px; }
 
 @media (max-width: 768px) {
   body { padding: 16px; }
-  .cards { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .cards { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .card-weight-hot { grid-column: span 2; }
   table { font-size: 0.72rem; }
   td, th { padding: 8px; }
-  header h1 { font-size: 1.25rem; }
+  .fleet-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
   .nav-bar a { font-size: 0.7rem; padding: 4px 8px; }
 }
 @media (max-width: 480px) {
   .cards { grid-template-columns: 1fr; }
+  .card-weight-hot { grid-column: span 1; }
 }
 """
 
@@ -1108,9 +1397,10 @@ TOOLBAR_CSS = """
 }
 .btn:hover { background: var(--surface-hover); border-color: var(--text-dim); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-family: var(--font-body); }
 .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .btn-primary:disabled { background: var(--accent); }
+.btn { font-family: var(--font-body); }
 .live-dot {
   width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block;
   animation: pulse 2s ease-in-out infinite;
@@ -1241,6 +1531,8 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
     health_cards = build_health_cards(prs_data, ci_data, renovate_data, sonar_data, codecov_data, security_audit_data)
     changes_section = build_changes_section(changes_data)
     action_items = build_action_items(prs_data, ci_data, renovate_data, sonar_data)
+    fleet_strip = build_fleet_strip(ci_data, prs_data)
+    hero = build_hero(now_str, ci_data, prs_data, renovate_data, sonar_data, len(repos_list))
     repo_status_section = build_repo_status_section(ci_data, prs_data, codecov_data)
     ci_section = build_ci_section(ci_data)
     correlation_section = build_correlation_section(correlation_data)
@@ -1271,7 +1563,7 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
 
     toolbar_html = """<div class="toolbar">
   <div class="toolbar-left">
-    <button class="btn btn-primary" id="refresh-btn" onclick="triggerRefresh()">Refresh Data</button>
+    <button class="btn btn-primary" id="refresh-btn" onclick="triggerRefresh()">Run full scan</button>
     <span id="refresh-status"></span>
   </div>
   <div class="toolbar-right">
@@ -1291,10 +1583,10 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Guardian Dashboard — Ansible Devtools</title>
+<title>Guardian — Ansible Devtools</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <style>{CSS}
 {TOOLBAR_CSS}</style>
 <script>
@@ -1303,13 +1595,11 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
 </head>
 <body>
 
-<header>
-  <h1>Guardian Dashboard</h1>
-  <p class="subtitle">Ansible Devtools — Full scan: {esc(now_str)}</p>
-  <div class="accent-line"></div>
-</header>
+{hero}
 
 {toolbar_html}
+
+{fleet_strip}
 
 {nav_html}
 
@@ -1322,7 +1612,7 @@ def generate_dashboard(prs_data, ci_data, renovate_data, sonar_data, correlation
 {sections}
 
 <footer class="footer">
-  Powered by <span>devtools-guardian</span>
+  Ansible Devtools · <span>Guardian</span> shift board
 </footer>
 
 <script>{js}</script>
